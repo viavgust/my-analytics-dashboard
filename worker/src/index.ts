@@ -6,6 +6,9 @@ export interface Env {
   COMPOSIO_API_KEY?: string;
   COMPOSIO_YT_AUTH_CONFIG_ID?: string;
   COMPOSIO_YT_ACCOUNT_ID?: string;
+  COMPOSIO_YT_CHANNEL_ID?: string;
+  COMPOSIO_YT_ENTITY_ID?: string;
+  COMPOSIO_YT_CHANNEL_HANDLE?: string;
 }
 
 type YoutubeMetrics = {
@@ -15,6 +18,14 @@ type YoutubeMetrics = {
   allTimeViews: number;
   subscribers: number;
   newVideos30d: number;
+  videoCount: number;
+  topVideo?: {
+    title: string;
+    views: number;
+    publishedAt?: string;
+    url?: string;
+    videoId?: string;
+  } | null;
 };
 
 // Главный обработчик Worker-а
@@ -47,21 +58,7 @@ export default {
       console.log("Has COMPOSIO_API_KEY:", !!env.COMPOSIO_API_KEY);
       const ytMetrics = await fetchYoutubeMetricsFromComposio(env);
       if (ytMetrics) {
-        const { viewsToday, views7d, views30d, allTimeViews, subscribers, newVideos30d } = ytMetrics;
-        await env.DB.prepare(`DELETE FROM youtube_daily`).run();
-        await env.DB.prepare(
-          `INSERT INTO youtube_daily(
-             updated_at,
-             views_today,
-             views_7d,
-             views_30d,
-             views_all_time,
-             subscribers,
-             new_videos_30d
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
-        )
-          .bind(new Date().toISOString(), viewsToday, views7d, views30d, allTimeViews, subscribers, newVideos30d)
-          .run();
+        await upsertYoutubeSnapshot(env, ytMetrics);
       } else {
         await refreshYoutubeDemo(env);
       }
@@ -86,27 +83,68 @@ async function handleDashboard(env: Env): Promise<Response> {
     const demoPayload = buildDemoDashboardPayload();
 
     // YouTube: берём последнюю строку агрегатов
-    const ytRow = await env.DB.prepare(
-      `SELECT
-         updated_at,
-         views_today,
-         views_7d,
-         views_30d,
-         views_all_time,
-         subscribers,
-         new_videos_30d
-       FROM youtube_daily
-       ORDER BY updated_at DESC
-       LIMIT 1`
-    ).first<{
-      updated_at: string;
-      views_today: number;
-      views_7d: number;
-      views_30d: number;
-      views_all_time: number;
-      subscribers: number;
-      new_videos_30d: number;
-    }>();
+    let ytRow:
+      | {
+          updated_at: string;
+          views_today: number;
+          views_7d: number;
+          views_30d: number;
+          views_all_time: number;
+          subscribers: number;
+          new_videos_30d: number;
+          videos_total?: number | null;
+        }
+      | null = null;
+
+    try {
+      ytRow = await env.DB.prepare(
+        `SELECT
+           updated_at,
+           views_today,
+           views_7d,
+           views_30d,
+           views_all_time,
+           subscribers,
+           new_videos_30d,
+           videos_total
+         FROM youtube_daily
+         ORDER BY updated_at DESC
+         LIMIT 1`
+      ).first();
+    } catch (err) {
+      // если нет колонки videos_total — добавим и попробуем снова
+      try {
+        await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN videos_total INTEGER").run();
+        ytRow = await env.DB.prepare(
+          `SELECT
+             updated_at,
+             views_today,
+             views_7d,
+             views_30d,
+             views_all_time,
+             subscribers,
+             new_videos_30d,
+             videos_total
+           FROM youtube_daily
+           ORDER BY updated_at DESC
+           LIMIT 1`
+        ).first();
+      } catch (_) {
+        ytRow = await env.DB.prepare(
+          `SELECT
+             updated_at,
+             views_today,
+             views_7d,
+             views_30d,
+             views_all_time,
+             subscribers,
+             new_videos_30d
+           FROM youtube_daily
+           ORDER BY updated_at DESC
+           LIMIT 1`
+        ).first();
+      }
+    }
 
     const salesResult = await env.DB.prepare(
       "SELECT * FROM sales_daily ORDER BY date DESC LIMIT 30"
@@ -334,40 +372,167 @@ function centsToDollars(cents: number | null | undefined): number {
   return Math.round(value) / 100;
 }
 
-// Загрузка метрик YouTube через Composio (заготовка, нужно дополнить реальными вызовами)
+function parseNumber(value: any, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function daysAgoIso(days: number) {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString();
+}
+
 async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics | null> {
-  if (!env.COMPOSIO_API_KEY || !env.COMPOSIO_YT_AUTH_CONFIG_ID || !env.COMPOSIO_YT_ACCOUNT_ID) {
+  if (!env.COMPOSIO_API_KEY || !env.COMPOSIO_YT_ACCOUNT_ID || !env.COMPOSIO_YT_ENTITY_ID) {
     console.warn("Composio YouTube not configured, falling back to demo");
     return null;
   }
 
+  const baseUrl = "https://backend.composio.dev/api/v3/tools/execute";
+
+  const callTool = async (tool: string, args: Record<string, any>) => {
+    const res = await fetch(`${baseUrl}/${tool}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.COMPOSIO_API_KEY!,
+      },
+      body: JSON.stringify({
+        connected_account_id: env.COMPOSIO_YT_ACCOUNT_ID,
+        entity_id: env.COMPOSIO_YT_ENTITY_ID,
+        arguments: args,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Composio tool ${tool} failed: ${res.status} ${text}`);
+    }
+    return res.json();
+  };
+
   try {
-    // TODO: взять точный эндпоинт и формат тела запроса из официальной документации Composio.
-    // Общая идея:
-    // 1) Вызвать YouTube-tool "list channel videos" (или эквивалент) через Composio
-    //    с полями snippet + statistics, используя auth_config_id и account_id.
-    // 2) Для каждого видео взять:
-    //    - publishedAt
-    //    - statistics.viewCount
-    // 3) Посчитать агрегаты:
-    //    - allTimeViews = сумма viewCount по всем видео
-    //    - views30d = сумма viewCount по видео, опубликованным за последние 30 дней
-    //    - views7d = сумма viewCount по видео, опубликованным за последние 7 дней
-    //    - viewsToday = сумма viewCount по видео, опубликованным "сегодня" (по дате, не по часу)
-    //    - subscribers и newVideos30d можно взять:
-    //        subscribers — из "get_channel_statistics"
-    //        newVideos30d — количество видео с publishedAt за последние 30 дней
-    //
-    // Внутри этой функции используй fetch к HTTP-API Composio или их JS-SDK
-    // (как удобнее для Cloudflare Worker), с Authorization: Bearer env.COMPOSIO_API_KEY.
+    const handle = env.COMPOSIO_YT_CHANNEL_HANDLE || "irina2755";
+
+    const resolveChannelId = async (): Promise<string | null> => {
+      try {
+        const primary = await callTool("YOUTUBE_GET_CHANNEL_ID_BY_HANDLE", {
+          channel_handle: `@${handle.replace(/^@/, "")}`,
+        });
+        console.log("YT handle->id primary", JSON.stringify(primary, null, 2));
+        const found =
+          primary?.data?.id ||
+          primary?.data?.channelId ||
+          primary?.data?.channel_id ||
+          primary?.data?.items?.[0]?.id ||
+          primary?.data?.items?.[0]?.channelId;
+        if (typeof found === "string" && found.length > 0) return found;
+      } catch (err) {
+        console.error("Handle->ID lookup failed", err);
+      }
+      try {
+        const alt = await callTool("YOUTUBE_GET_CHANNEL_ID_BY_HANDLE", {
+          channel_handle: handle.replace(/^@/, ""),
+        });
+        console.log("YT handle->id alt", JSON.stringify(alt, null, 2));
+        const found =
+          alt?.data?.id ||
+          alt?.data?.channelId ||
+          alt?.data?.channel_id ||
+          alt?.data?.items?.[0]?.id ||
+          alt?.data?.items?.[0]?.channelId;
+        if (typeof found === "string" && found.length > 0) return found;
+      } catch (err) {
+        console.error("Handle->ID alt lookup failed", err);
+      }
+      return env.COMPOSIO_YT_CHANNEL_ID ?? null;
+    };
+
+    const channelId = await resolveChannelId();
+    if (!channelId) return null;
+
+    const resp = await callTool("YOUTUBE_GET_CHANNEL_STATISTICS", {
+      id: channelId,
+      part: "statistics",
+    });
+
+    let stats =
+      resp?.data?.items?.[0]?.statistics ||
+      resp?.data?.channels?.[0]?.statistics;
+
+    // Если первый вызов ничего не вернул, пробуем альтернативный вариант параметров
+    if (!stats) {
+      try {
+        const alt = await callTool("YOUTUBE_GET_CHANNEL_STATISTICS", {
+          channelId,
+          part: "statistics",
+        });
+        stats = alt?.data?.items?.[0]?.statistics;
+      } catch (e) {
+        console.error("Alt YT stats fetch failed", e);
+      }
+    }
+
+    let topVideo: YoutubeMetrics["topVideo"] = null;
+    try {
+      const search = await callTool("YOUTUBE_SEARCH_LIST", {
+        channelId,
+        order: "viewCount",
+        type: "video",
+        part: "snippet",
+        maxResults: 1,
+      });
+      const first = search?.data?.items?.[0];
+      const videoId = first?.id?.videoId || first?.id || first?.videoId || first?.video_id;
+      const title = first?.snippet?.title;
+      const publishedAt = first?.snippet?.publishedAt;
+      let views = 0;
+
+      if (videoId) {
+        try {
+          const videoStats = await callTool("YOUTUBE_VIDEOS_LIST", {
+            id: videoId,
+            part: "statistics,snippet",
+          });
+          const vstats =
+            videoStats?.data?.items?.[0]?.statistics || videoStats?.data?.videos?.[0]?.statistics;
+          views = parseNumber(vstats?.viewCount, 0);
+        } catch (err) {
+          console.error("Top video stats fetch failed", err);
+        }
+      }
+
+      if (title && videoId) {
+        topVideo = {
+          title,
+          views,
+          publishedAt,
+          url: `https://youtube.com/watch?v=${videoId}`,
+          videoId,
+        };
+      }
+    } catch (err) {
+      console.error("Top video lookup failed", err);
+    }
+
+    if (!stats) {
+      console.warn("YT stats empty after tool call", JSON.stringify(resp));
+      return null;
+    }
+
+    const allTimeViews = parseNumber(stats.viewCount, 0);
+    const subscribers = parseNumber(stats.subscriberCount, 0);
+    const videoCount = parseNumber(stats.videoCount, 0);
 
     return {
-      viewsToday: 0,
+      viewsToday: 0, // вычислим дельты при записи в БД
       views7d: 0,
       views30d: 0,
-      allTimeViews: 0,
-      subscribers: 0,
-      newVideos30d: 0,
+      allTimeViews,
+      subscribers,
+      newVideos30d: 0, // вычислим дельты при записи в БД (по videoCount)
+      videoCount,
+      topVideo,
     };
   } catch (err) {
     console.error("Failed to load YouTube metrics from Composio", err);
@@ -375,26 +540,91 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
   }
 }
 
+// Загрузка метрик YouTube через Composio (заготовка, нужно дополнить реальными вызовами)
 // Демо-обновление YouTube данных
 async function refreshYoutubeDemo(env: Env): Promise<void> {
-  await env.DB.prepare("DELETE FROM youtube_daily").run();
-
   await env.DB
     .prepare(
       `INSERT INTO youtube_daily
          (updated_at, views_today, views_7d, views_30d, views_all_time, subscribers, new_videos_30d)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
+    .bind(new Date().toISOString(), 1234, 8567, 32450, 1200000, 182000, 4)
+    .run();
+}
+
+// Запись снимка YouTube на основе тоталов и исторических значений
+async function upsertYoutubeSnapshot(env: Env, metrics: YoutubeMetrics) {
+  try {
+    await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN videos_total INTEGER").run();
+  } catch (_) {
+    // колонка уже есть или миграция не требуется
+  }
+  try {
+    await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_title TEXT").run();
+  } catch (_) {}
+  try {
+    await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_views INTEGER").run();
+  } catch (_) {}
+  try {
+    await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_url TEXT").run();
+  } catch (_) {}
+  try {
+    await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_published_at TEXT").run();
+  } catch (_) {}
+
+  const nowIso = new Date().toISOString();
+
+  const { results: prevRows } = await env.DB.prepare(
+    "SELECT updated_at, views_all_time, subscribers, new_videos_30d, videos_total FROM youtube_daily ORDER BY updated_at DESC"
+  ).all<{
+    updated_at: string;
+    views_all_time: number;
+    subscribers: number;
+    new_videos_30d?: number | null;
+    videos_total?: number | null;
+  }>();
+
+  const prev = prevRows?.[0];
+  const prev7 = prevRows?.find((r) => r.updated_at <= daysAgoIso(7));
+  const prev30 = prevRows?.find((r) => r.updated_at <= daysAgoIso(30));
+
+  const allTimeViews = metrics.allTimeViews;
+  const viewsToday = prev ? Math.max(0, allTimeViews - parseNumber(prev.views_all_time, 0)) : 0;
+  const views7d = prev7 ? Math.max(0, allTimeViews - parseNumber(prev7.views_all_time, 0)) : allTimeViews;
+  const views30d = prev30 ? Math.max(0, allTimeViews - parseNumber(prev30.views_all_time, 0)) : allTimeViews;
+
+  const videoCount = metrics.videoCount;
+  const prevVideos = parseNumber(prev?.videos_total ?? prev?.new_videos_30d, 0);
+  const prevVideos30 = parseNumber(prev30?.videos_total ?? prev30?.new_videos_30d, prevVideos);
+  const newVideos30d = Math.max(0, videoCount - prevVideos30);
+
+  await env.DB
+    .prepare(
+      `INSERT INTO youtube_daily
+         (updated_at, views_today, views_7d, views_30d, views_all_time, subscribers, new_videos_30d, top_video_title, top_video_views, top_video_url, top_video_published_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)`
+    )
     .bind(
-      "2025-03-15T00:00:00.000Z",
-      1234, // views_today
-      8567, // views_7d (из демо)
-      32450, // views_30d (из демо)
-      1200000, // views_all_time
-      182000, // subscribers
-      4 // new_videos_30d
+      nowIso,
+      viewsToday,
+      views7d,
+      views30d,
+      allTimeViews,
+      metrics.subscribers,
+      newVideos30d,
+      metrics.topVideo?.title ?? null,
+      metrics.topVideo ? parseNumber(metrics.topVideo.views, 0) : null,
+      metrics.topVideo?.url ?? null,
+      metrics.topVideo?.publishedAt ?? null
     )
     .run();
+
+  try {
+    await env.DB.prepare("UPDATE youtube_daily SET videos_total = ? WHERE updated_at = ?").bind(videoCount, nowIso).run();
+  } catch (_) {
+    // если колонки нет - пропускаем
+  }
 }
 
 // Демо-обновление Sales данных
@@ -421,8 +651,6 @@ async function refreshSalesDemo(env: Env): Promise<void> {
 async function refreshTelegram(env: Env) {
   const slug = env.TELEGRAM_CHANNEL_SLUG || "my_channel";
 
-  await env.DB.prepare("DELETE FROM telegram_posts WHERE channel_slug = ?").bind(slug).run();
-
   const demoPosts = [
     {
       message_id: "451",
@@ -444,11 +672,48 @@ async function refreshTelegram(env: Env) {
     },
   ];
 
+  const parseTelegramPosts = (html: string) => {
+    const result: { id: string; text: string; publishedAt: string }[] = [];
+    const postRegex = /data-post="[^/]+\/(\d+)"[\s\S]*?datetime="([^"]+)"[\s\S]*?class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
+    let match: RegExpExecArray | null;
+    while ((match = postRegex.exec(html)) && result.length < 3) {
+      const [, id, datetime, rawText] = match;
+      const text = rawText
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      result.push({ id, text, publishedAt: datetime });
+    }
+    return result;
+  };
+
+  let posts = demoPosts;
+  try {
+    const res = await fetch(`https://t.me/s/${slug}`, { method: "GET" });
+    if (res.ok) {
+      const html = await res.text();
+      const parsed = parseTelegramPosts(html);
+      if (parsed.length > 0) {
+        posts = parsed.map((p) => ({
+          message_id: p.id,
+          text: p.text || "Без текста",
+          published_at: p.publishedAt,
+          message_url: `https://t.me/${slug}/${p.id}`,
+        }));
+      }
+    }
+  } catch (err) {
+    console.error("Failed to fetch Telegram HTML, fallback to demo", err);
+  }
+
+  await env.DB.prepare("DELETE FROM telegram_posts WHERE channel_slug = ?").bind(slug).run();
+
   const insert = env.DB.prepare(
     "INSERT INTO telegram_posts (channel_slug, message_id, text, published_at, message_url) VALUES (?, ?, ?, ?, ?)"
   );
 
-  for (const post of demoPosts) {
+  for (const post of posts.slice(0, 3)) {
     await insert.bind(slug, post.message_id, post.text, post.published_at, post.message_url).run();
   }
 }

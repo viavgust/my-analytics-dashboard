@@ -41,6 +41,13 @@ const FALLBACK_DASHBOARD: DashboardResponse = {
         { label: "Mar", views: 32450 },
       ],
     },
+    topVideo: {
+      title: "Demo top video",
+      views: 12000,
+      publishedAt: "2025-01-01T00:00:00Z",
+      url: "https://youtube.com",
+      videoId: "demo",
+    },
   },
   sales: {
     metrics: {
