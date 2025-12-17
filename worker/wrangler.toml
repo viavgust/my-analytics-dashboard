@@ -1,0 +1,14 @@
+name = "analytics-dashboard-worker"
+main = "src/index.ts"
+compatibility_date = "2025-03-15"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "analytics_dashboard_db"
+database_id = "1ae258f9-b8db-46bb-8895-dcb1e59b1810"
+migrations_dir = "migrations"
+
+[vars]
+TELEGRAM_CHANNEL_SLUG = "my_channel"
+COMPOSIO_YT_AUTH_CONFIG_ID = ""
+COMPOSIO_YT_ACCOUNT_ID = ""
