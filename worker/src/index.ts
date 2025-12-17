@@ -28,6 +28,8 @@ type YoutubeMetrics = {
   } | null;
 };
 
+const TOP_VIDEO_ID = "_AMRlYI3Q-o";
+
 // Главный обработчик Worker-а
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -93,6 +95,10 @@ async function handleDashboard(env: Env): Promise<Response> {
           subscribers: number;
           new_videos_30d: number;
           videos_total?: number | null;
+          top_video_title?: string | null;
+          top_video_views?: number | null;
+          top_video_url?: string | null;
+          top_video_published_at?: string | null;
         }
       | null = null;
 
@@ -106,7 +112,11 @@ async function handleDashboard(env: Env): Promise<Response> {
            views_all_time,
            subscribers,
            new_videos_30d,
-           videos_total
+           videos_total,
+           top_video_title,
+           top_video_views,
+           top_video_url,
+           top_video_published_at
          FROM youtube_daily
          ORDER BY updated_at DESC
          LIMIT 1`
@@ -115,6 +125,10 @@ async function handleDashboard(env: Env): Promise<Response> {
       // если нет колонки videos_total — добавим и попробуем снова
       try {
         await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN videos_total INTEGER").run();
+        await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_title TEXT").run();
+        await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_views INTEGER").run();
+        await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_url TEXT").run();
+        await env.DB.prepare("ALTER TABLE youtube_daily ADD COLUMN top_video_published_at TEXT").run();
         ytRow = await env.DB.prepare(
           `SELECT
              updated_at,
@@ -124,7 +138,11 @@ async function handleDashboard(env: Env): Promise<Response> {
              views_all_time,
              subscribers,
              new_videos_30d,
-             videos_total
+             videos_total,
+             top_video_title,
+             top_video_views,
+             top_video_url,
+             top_video_published_at
            FROM youtube_daily
            ORDER BY updated_at DESC
            LIMIT 1`
@@ -169,6 +187,7 @@ async function handleDashboard(env: Env): Promise<Response> {
     // --- YouTube метрики и график ---
     let youtubeMetrics;
     let youtubeChart;
+    let youtubeTopVideo: YoutubeMetrics["topVideo"] | null | undefined;
 
     if (ytRow) {
       youtubeMetrics = {
@@ -179,11 +198,21 @@ async function handleDashboard(env: Env): Promise<Response> {
         newVideos30d: ytRow.new_videos_30d ?? 0,
         subscribers: ytRow.subscribers ?? 0,
       };
+      youtubeTopVideo =
+        ytRow.top_video_title && ytRow.top_video_views !== undefined
+          ? {
+              title: ytRow.top_video_title,
+              views: ytRow.top_video_views ?? 0,
+              publishedAt: ytRow.top_video_published_at ?? undefined,
+              url: ytRow.top_video_url ?? undefined,
+            }
+          : null;
       // временно используем демо-график, пока не строим из истории
       youtubeChart = demoPayload.youtube.chart;
     } else {
       youtubeMetrics = demoPayload.youtube.metrics;
       youtubeChart = demoPayload.youtube.chart;
+      youtubeTopVideo = demoPayload.youtube.topVideo ?? null;
     }
 
     // --- Sales / eBay метрики и график ---
@@ -271,6 +300,7 @@ async function handleDashboard(env: Env): Promise<Response> {
       youtube: {
         metrics: youtubeMetrics,
         chart: youtubeChart,
+        topVideo: youtubeTopVideo,
       },
       sales: {
         metrics: salesMetrics,
@@ -474,45 +504,62 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
     }
 
     let topVideo: YoutubeMetrics["topVideo"] = null;
-    try {
-      const search = await callTool("YOUTUBE_SEARCH_LIST", {
-        channelId,
-        order: "viewCount",
-        type: "video",
-        part: "snippet",
-        maxResults: 1,
-      });
-      const first = search?.data?.items?.[0];
-      const videoId = first?.id?.videoId || first?.id || first?.videoId || first?.video_id;
-      const title = first?.snippet?.title;
-      const publishedAt = first?.snippet?.publishedAt;
-      let views = 0;
-
-      if (videoId) {
+    {
+      const videoId = TOP_VIDEO_ID;
+      const tryDetail = async (tool: string) => {
         try {
-          const videoStats = await callTool("YOUTUBE_VIDEOS_LIST", {
+          const videoStats = await callTool(tool, {
             id: videoId,
             part: "statistics,snippet",
           });
-          const vstats =
-            videoStats?.data?.items?.[0]?.statistics || videoStats?.data?.videos?.[0]?.statistics;
-          views = parseNumber(vstats?.viewCount, 0);
+          const item = videoStats?.data?.items?.[0] ?? videoStats?.data?.videos?.[0];
+          const statsVideo = item?.statistics;
+          const snippet = item?.snippet;
+          const title = snippet?.title;
+          const publishedAt = snippet?.publishedAt;
+          const views = parseNumber(statsVideo?.viewCount, 0);
+          if (title) {
+            return {
+              title,
+              views,
+              publishedAt,
+              url: `https://youtube.com/watch?v=${videoId}`,
+              videoId,
+            };
+          }
         } catch (err) {
-          console.error("Top video stats fetch failed", err);
+          console.error(`Top video tool ${tool} failed`, err);
+        }
+        return null;
+      };
+
+      topVideo = (await tryDetail("YOUTUBE_GET_VIDEO_DETAILS")) || (await tryDetail("YOUTUBE_VIDEOS_LIST"));
+
+      if (!topVideo) {
+        try {
+          const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+          if (res.ok) {
+            const html = await res.text();
+            const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/i);
+            const viewsMatch = html.match(/"viewCount"\\?":\\?\"?(\\d+)\"?/);
+            const publishedMatch = html.match(/"publishDate"\\?":\\?\"([^"]+)\"/);
+            const title = titleMatch?.[1];
+            const views = parseNumber(viewsMatch?.[1], 0);
+            const publishedAt = publishedMatch?.[1];
+            if (title) {
+              topVideo = {
+                title,
+                views,
+                publishedAt,
+                url: `https://youtube.com/watch?v=${videoId}`,
+                videoId,
+              };
+            }
+          }
+        } catch (err) {
+          console.error("Top video HTML fallback failed", err);
         }
       }
-
-      if (title && videoId) {
-        topVideo = {
-          title,
-          views,
-          publishedAt,
-          url: `https://youtube.com/watch?v=${videoId}`,
-          videoId,
-        };
-      }
-    } catch (err) {
-      console.error("Top video lookup failed", err);
     }
 
     if (!stats) {

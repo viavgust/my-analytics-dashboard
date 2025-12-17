@@ -2,6 +2,7 @@ import { HeroSection } from "@/components/hero-section"
 import { MetricCards } from "@/components/metric-cards"
 import { ChartsRow } from "@/components/charts-row"
 import { StudyCalendarCard } from "@/components/study-calendar-card"
+import { TopVideoCard } from "@/components/top-video-card"
 import {
   type DashboardResponse,
   type DashboardTelegram,
@@ -96,6 +97,7 @@ export default async function DashboardPage() {
         <HeroSection updatedAt={dashboard.updatedAt} workerUrl={WORKER_URL} />
         <MetricCards telegram={telegram} youtube={youtube} sales={sales} />
         <ChartsRow youtube={youtube.chart.points} sales={sales.chart.points} />
+        <TopVideoCard topVideo={youtube.topVideo} />
         <StudyCalendarCard />
       </div>
     </div>
