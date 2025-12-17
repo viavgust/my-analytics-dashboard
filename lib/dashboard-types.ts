@@ -17,6 +17,7 @@ export type DashboardYouTubeMetrics = {
   allTimeViews: number
   newVideos30d: number
   subscribers?: number
+  videoCount?: number
 }
 
 export type DashboardTopVideo = {

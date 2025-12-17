@@ -8,8 +8,9 @@ type MetricCardsProps = {
   sales: DashboardSales
 }
 
-function formatNumber(value: number) {
-  return value.toLocaleString()
+function formatNumber(value: number, allowNA = false) {
+  if (allowNA && (value === undefined || value === null || Number.isNaN(Number(value)))) return "N/A"
+  return Number.isFinite(Number(value)) ? Number(value).toLocaleString() : "N/A"
 }
 
 function formatCurrency(value: number) {
@@ -70,10 +71,15 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4">
-            <MetricItem label="Week (7d)" value={formatNumber(youtube.metrics.views7d)} />
-            <MetricItem label="Month (30d)" value={formatNumber(youtube.metrics.views30d)} />
-            <MetricItem label="Year (365d)" value={formatNumber(youtube.metrics.views30d)} />
-            <MetricItem label="All time" value={formatNumber(youtube.metrics.allTimeViews)} />
+            <MetricItem label="Subscribers" value={formatNumber(youtube.metrics.subscribers ?? 0, true)} />
+            <MetricItem
+              label="Videos"
+              value={
+                typeof youtube.metrics.videoCount === "number"
+                  ? formatNumber(youtube.metrics.videoCount, true)
+                  : "N/A"
+              }
+            />
           </div>
         </CardContent>
       </Card>
