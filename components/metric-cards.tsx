@@ -70,16 +70,10 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4">
-            <MetricItem label="Views today" value={formatNumber(youtube.metrics.viewsToday)} />
-            <MetricItem label="Last 7 days" value={formatNumber(youtube.metrics.views7d)} />
-            <MetricItem label="Last 30 days" value={formatNumber(youtube.metrics.views30d)} />
+            <MetricItem label="Week (7d)" value={formatNumber(youtube.metrics.views7d)} />
+            <MetricItem label="Month (30d)" value={formatNumber(youtube.metrics.views30d)} />
+            <MetricItem label="Year (365d)" value={formatNumber(youtube.metrics.views30d)} />
             <MetricItem label="All time" value={formatNumber(youtube.metrics.allTimeViews)} />
-          </div>
-          <div className="mt-4 pt-3 border-t border-white/10">
-            <p className="text-gray-400 text-sm">
-              New videos in last 30 days:{" "}
-              <span className="text-amber-400 font-semibold">{formatNumber(youtube.metrics.newVideos30d)}</span>
-            </p>
           </div>
         </CardContent>
       </Card>
