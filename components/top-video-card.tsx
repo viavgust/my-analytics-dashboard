@@ -18,7 +18,12 @@ function formatDate(value?: string) {
 }
 
 export function TopVideoCard({ topVideo }: TopVideoCardProps) {
-  const barWidth = topVideo ? (topVideo.views > 0 ? "100%" : "10%") : "0%";
+  const barWidth =
+    topVideo && typeof topVideo.views === "number" && Number.isFinite(topVideo.views) && topVideo.views > 0
+      ? "100%"
+      : topVideo
+        ? "10%"
+        : "0%"
 
   return (
     <Card className="bg-gradient-to-br from-[#2a2520]/80 to-[#1e1a16]/80 backdrop-blur-xl border-white/10 rounded-2xl">
@@ -50,7 +55,10 @@ export function TopVideoCard({ topVideo }: TopVideoCardProps) {
             <div>
               <p className="text-white text-sm font-semibold line-clamp-2">{topVideo.title}</p>
               <p className="text-gray-500 text-xs">
-                {formatNumber(topVideo.views)} views · {formatDate(topVideo.publishedAt)}
+                {typeof topVideo.views === "number" && Number.isFinite(topVideo.views)
+                  ? `${formatNumber(topVideo.views)} views`
+                  : "N/A views"}{" "}
+                · {formatDate(topVideo.publishedAt)}
               </p>
             </div>
             <div className="mt-2 h-3 w-full rounded-full bg-white/5 border border-white/10">

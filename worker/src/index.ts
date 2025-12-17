@@ -507,57 +507,38 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
     {
       const videoId = TOP_VIDEO_ID;
       const tryDetail = async (tool: string) => {
-        try {
-          const videoStats = await callTool(tool, {
-            id: videoId,
-            part: "statistics,snippet",
-          });
-          const item = videoStats?.data?.items?.[0] ?? videoStats?.data?.videos?.[0];
-          const statsVideo = item?.statistics;
-          const snippet = item?.snippet;
-          const title = snippet?.title;
-          const publishedAt = snippet?.publishedAt;
-          const views = parseNumber(statsVideo?.viewCount, 0);
-          if (title) {
-            return {
-              title,
-              views,
-              publishedAt,
-              url: `https://youtube.com/watch?v=${videoId}`,
-              videoId,
-            };
-          }
-        } catch (err) {
-          console.error(`Top video tool ${tool} failed`, err);
+        const videoStats = await callTool(tool, {
+          id: videoId,
+          part: "statistics,snippet",
+        });
+        const item = videoStats?.data?.items?.[0] ?? videoStats?.data?.videos?.[0];
+        const statsVideo = item?.statistics;
+        const snippet = item?.snippet;
+        const title = snippet?.title;
+        const publishedAt = snippet?.publishedAt;
+        const views = statsVideo?.viewCount !== undefined ? parseNumber(statsVideo?.viewCount, 0) : undefined;
+        if (title) {
+          return {
+            title,
+            views: views ?? 0,
+            publishedAt,
+            url: `https://youtube.com/watch?v=${videoId}`,
+            videoId,
+          };
         }
         return null;
       };
 
-      topVideo = (await tryDetail("YOUTUBE_GET_VIDEO_DETAILS")) || (await tryDetail("YOUTUBE_VIDEOS_LIST"));
-
+      try {
+        topVideo = (await tryDetail("YOUTUBE_GET_VIDEO_DETAILS")) || null;
+      } catch (_) {
+        topVideo = null;
+      }
       if (!topVideo) {
         try {
-          const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
-          if (res.ok) {
-            const html = await res.text();
-            const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/i);
-            const viewsMatch = html.match(/"viewCount"\\?":\\?\"?(\\d+)\"?/);
-            const publishedMatch = html.match(/"publishDate"\\?":\\?\"([^"]+)\"/);
-            const title = titleMatch?.[1];
-            const views = parseNumber(viewsMatch?.[1], 0);
-            const publishedAt = publishedMatch?.[1];
-            if (title) {
-              topVideo = {
-                title,
-                views,
-                publishedAt,
-                url: `https://youtube.com/watch?v=${videoId}`,
-                videoId,
-              };
-            }
-          }
-        } catch (err) {
-          console.error("Top video HTML fallback failed", err);
+          topVideo = await tryDetail("YOUTUBE_VIDEOS_LIST");
+        } catch (_) {
+          topVideo = null;
         }
       }
     }
