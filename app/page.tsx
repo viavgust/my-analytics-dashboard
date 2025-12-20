@@ -10,7 +10,10 @@ import {
   type DashboardCalendarEvent,
 } from "@/lib/dashboard-types"
 
-const WORKER_URL = "http://localhost:8788"
+const WORKER_URL =
+  process.env.NEXT_PUBLIC_WORKER_PUBLIC_URL ||
+  process.env.WORKER_PUBLIC_URL ||
+  "http://localhost:8788"
 
 const FALLBACK_DASHBOARD: DashboardResponse = {
   updatedAt: "2025-03-15T09:15:00Z",

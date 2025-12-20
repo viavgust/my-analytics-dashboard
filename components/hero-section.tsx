@@ -35,7 +35,7 @@ export function HeroSection({ updatedAt, workerUrl }: HeroSectionProps) {
   const handleRefresh = async () => {
     setIsRefreshing(true)
     try {
-      await fetch("http://localhost:8788/api/refresh", { method: "POST" })
+      await fetch(`${refreshEndpoint}/api/refresh`, { method: "POST" })
       router.refresh()
     } catch (error) {
       console.error("Refresh failed", error)
