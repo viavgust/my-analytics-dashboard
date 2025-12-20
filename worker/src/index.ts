@@ -181,7 +181,7 @@ async function handleDashboard(env: Env): Promise<Response> {
     }
 
     const salesResult = await env.DB.prepare(
-      "SELECT * FROM sales_daily ORDER BY date DESC LIMIT 30"
+      "SELECT * FROM sales_daily ORDER BY date DESC"
     ).all();
 
     const telegramResult = await env.DB.prepare(
@@ -247,30 +247,17 @@ async function handleDashboard(env: Env): Promise<Response> {
     let salesChart;
 
     if (salesRows.length) {
-      const latest = salesRows[0] as any;
-      const last7 = salesRows.slice(0, 7);
-      const last30 = salesRows.slice(0, 30);
-
-      const totalSales7d = sumField(last7, "total_sales");
-      const totalRevenue7dCents = sumField(last7, "total_revenue_cents");
-      const totalProfit7dCents = sumField(last7, "total_profit_cents");
-
-      const totalSales30d = sumField(last30, "total_sales");
-      const totalRevenue30dCents = sumField(last30, "total_revenue_cents");
-      const totalProfit30dCents = sumField(last30, "total_profit_cents");
-
-      // Для карточки можно взять агрегаты за 30 дней
-      const totalSales = totalSales30d;
-      const totalRevenue = centsToDollars(totalRevenue30dCents);
-      const totalProfit = centsToDollars(totalProfit30dCents);
-      const avgProfit =
-        totalSales > 0 ? totalProfit / totalSales : 0;
+      const totalSalesAll = sumField(salesRows, "total_sales");
+      const totalRevenueAllCents = sumField(salesRows, "total_revenue_cents");
+      const totalProfitAllCents = sumField(salesRows, "total_profit_cents");
+      const avgProfitAll =
+        totalSalesAll > 0 ? centsToDollars(totalProfitAllCents) / totalSalesAll : 0;
 
       salesMetrics = {
-        totalSales,
-        totalRevenue,
-        totalProfit,
-        avgProfit,
+        totalSales: totalSalesAll,
+        totalRevenue: centsToDollars(totalRevenueAllCents),
+        totalProfit: centsToDollars(totalProfitAllCents),
+        avgProfit: avgProfitAll,
       };
 
       const salesPoints = salesRows
@@ -281,9 +268,12 @@ async function handleDashboard(env: Env): Promise<Response> {
           revenue: centsToDollars(row.total_revenue_cents ?? 0),
         }));
 
+      // ограничим график последними 120 точками (если нужно)
+      const limitedPoints = salesPoints.slice(-120);
+
       salesChart = {
         granularity: "day",
-        points: salesPoints,
+        points: limitedPoints,
       };
     } else {
       salesMetrics = {
