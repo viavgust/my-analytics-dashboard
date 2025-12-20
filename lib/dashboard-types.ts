@@ -33,6 +33,14 @@ export type DashboardYouTubeChartPoint = {
   views: number
 }
 
+export type DashboardYouTubeVideo = {
+  title: string
+  url: string
+  publishedAt: string
+  thumbnailUrl?: string | null
+  videoId?: string | null
+}
+
 export type DashboardYouTube = {
   metrics: DashboardYouTubeMetrics
   chart: {
@@ -40,6 +48,7 @@ export type DashboardYouTube = {
     points: DashboardYouTubeChartPoint[]
   }
   topVideo?: DashboardTopVideo | null
+  latestVideos?: DashboardYouTubeVideo[]
 }
 
 export type DashboardSalesMetrics = {

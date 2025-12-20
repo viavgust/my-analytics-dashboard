@@ -7,6 +7,7 @@ import {
   type DashboardTelegram,
   type DashboardYouTube,
   type DashboardSales,
+  type DashboardCalendarEvent,
 } from "@/lib/dashboard-types"
 
 const WORKER_URL = "http://localhost:8788"
@@ -68,6 +69,7 @@ const FALLBACK_DASHBOARD: DashboardResponse = {
       ],
     },
   },
+  calendar: [],
 }
 
 async function getDashboardData(): Promise<DashboardResponse> {
@@ -89,6 +91,7 @@ export default async function DashboardPage() {
   const telegram: DashboardTelegram = dashboard.telegram ?? FALLBACK_DASHBOARD.telegram
   const youtube: DashboardYouTube = dashboard.youtube ?? FALLBACK_DASHBOARD.youtube
   const sales: DashboardSales = dashboard.sales ?? FALLBACK_DASHBOARD.sales
+  const calendar: DashboardCalendarEvent[] = dashboard.calendar ?? []
 
   return (
     <div className="min-h-screen bg-[#1a1814] text-white p-6 md:p-8">
@@ -96,7 +99,7 @@ export default async function DashboardPage() {
         <HeroSection updatedAt={dashboard.updatedAt} workerUrl={WORKER_URL} />
         <MetricCards telegram={telegram} youtube={youtube} sales={sales} />
         <ChartsRow sales={sales.chart.points} />
-        <StudyCalendarCard />
+        <StudyCalendarCard events={calendar} />
       </div>
     </div>
   )

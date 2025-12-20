@@ -65,21 +65,34 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
             </div>
             <div>
               <CardTitle className="text-white text-lg">YouTube</CardTitle>
-              <p className="text-gray-500 text-sm">Channel performance</p>
+              <p className="text-gray-500 text-sm">Latest 3 videos from channel</p>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-4">
-            <MetricItem label="Subscribers" value={formatNumber(youtube.metrics.subscribers ?? 0, true)} />
-            <MetricItem
-              label="Videos"
-              value={
-                typeof youtube.metrics.videoCount === "number"
-                  ? formatNumber(youtube.metrics.videoCount, true)
-                  : "N/A"
-              }
-            />
+          <div className="space-y-2">
+            {(youtube.latestVideos ?? []).slice(0, 3).map((video) => (
+              <div key={video.videoId ?? video.url} className="p-3 rounded-xl bg-white/5 border border-white/5 flex gap-3 items-center">
+                {video.thumbnailUrl ? (
+                  <img
+                    src={video.thumbnailUrl}
+                    alt={video.title}
+                    className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-lg bg-white/5 flex-shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-gray-300 text-sm line-clamp-1">{video.title}</p>
+                  <p className="text-gray-500 text-xs mt-1">{formatRelativeTime(video.publishedAt)}</p>
+                </div>
+              </div>
+            ))}
+            {(youtube.latestVideos ?? []).length === 0 && (
+              <div className="p-3 rounded-xl bg-white/5 border border-white/5">
+                <p className="text-gray-500 text-sm">No videos yet</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

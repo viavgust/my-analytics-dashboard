@@ -9,6 +9,14 @@ export interface Env {
   COMPOSIO_YT_CHANNEL_ID?: string;
   COMPOSIO_YT_ENTITY_ID?: string;
   COMPOSIO_YT_CHANNEL_HANDLE?: string;
+  YOUTUBE_SOURCE_HANDLE?: string;
+  YOUTUBE_SOURCE_CHANNEL_ID?: string;
+  COMPOSIO_SHEETS_ACCOUNT_ID?: string;
+  COMPOSIO_SHEETS_ENTITY_ID?: string;
+  SALES_SHEET_ID?: string;
+  SALES_SHEET_RANGE?: string;
+  COMPOSIO_CALENDAR_ACCOUNT_ID?: string;
+  COMPOSIO_CALENDAR_ENTITY_ID?: string;
 }
 
 type YoutubeMetrics = {
@@ -26,6 +34,13 @@ type YoutubeMetrics = {
     url?: string;
     videoId?: string;
   } | null;
+  latestVideos?: {
+    title: string;
+    url: string;
+    publishedAt: string;
+    thumbnailUrl?: string | null;
+    videoId?: string | null;
+  }[];
 };
 
 const TOP_VIDEO_ID = "_AMRlYI3Q-o";
@@ -65,11 +80,12 @@ export default {
         await refreshYoutubeDemo(env);
       }
 
-      await refreshSalesDemo(env);
+      await refreshSalesFromSheets(env);
       await refreshTelegram(env);
+      await refreshCalendar(env);
       return jsonResponse({
         ok: true,
-        message: "Refresh demo data updated in D1",
+        message: "Refresh completed (telegram/youtube/sales/calendar)",
       });
     }
 
@@ -184,6 +200,8 @@ async function handleDashboard(env: Env): Promise<Response> {
 
     const updatedAt = new Date().toISOString();
 
+    const latestVideos = await fetchLatestYoutubeVideos(env);
+
     // --- YouTube метрики и график ---
     let youtubeMetrics;
     let youtubeChart;
@@ -214,6 +232,10 @@ async function handleDashboard(env: Env): Promise<Response> {
       youtubeChart = demoPayload.youtube.chart;
       youtubeTopVideo = demoPayload.youtube.topVideo ?? null;
     }
+    const youtubeLatestVideos =
+      latestVideos.length > 0
+        ? latestVideos
+        : demoPayload.youtube.latestVideos ?? [];
 
     // --- Sales / eBay метрики и график ---
 
@@ -291,21 +313,23 @@ async function handleDashboard(env: Env): Promise<Response> {
           }))
         : demoPayload.telegram.posts;
 
-    const payload = {
-      updatedAt,
-      telegram: {
-        channel: telegramChannel,
-        posts: telegramPosts,
+  const payload = {
+    updatedAt,
+    telegram: {
+      channel: telegramChannel,
+      posts: telegramPosts,
       },
       youtube: {
         metrics: youtubeMetrics,
         chart: youtubeChart,
         topVideo: youtubeTopVideo,
+        latestVideos: youtubeLatestVideos,
       },
       sales: {
         metrics: salesMetrics,
         chart: salesChart,
       },
+      calendar: await loadCalendarEvents(env),
     };
 
     return jsonResponse(payload);
@@ -360,6 +384,29 @@ function buildDemoDashboardPayload() {
           { label: "Mar", views: 32450 },
         ],
       },
+      latestVideos: [
+        {
+          title: "Travel guide: hidden gems in the city",
+          url: "https://youtube.com/watch?v=demo1",
+          publishedAt: "2025-03-15T10:00:00Z",
+          thumbnailUrl: "https://i.ytimg.com/vi/demo1/hqdefault.jpg",
+          videoId: "demo1",
+        },
+        {
+          title: "Weekend getaway highlights",
+          url: "https://youtube.com/watch?v=demo2",
+          publishedAt: "2025-03-14T08:30:00Z",
+          thumbnailUrl: "https://i.ytimg.com/vi/demo2/hqdefault.jpg",
+          videoId: "demo2",
+        },
+        {
+          title: "Street food tour",
+          url: "https://youtube.com/watch?v=demo3",
+          publishedAt: "2025-03-12T18:00:00Z",
+          thumbnailUrl: "https://i.ytimg.com/vi/demo3/hqdefault.jpg",
+          videoId: "demo3",
+        },
+      ],
     },
     sales: {
       metrics: {
@@ -402,15 +449,234 @@ function centsToDollars(cents: number | null | undefined): number {
   return Math.round(value) / 100;
 }
 
+function moneyStringToCents(input: any): number {
+  if (typeof input !== "string") return 0;
+  const cleaned = input.replace(/,/g, ".").replace(/\s+/g, "").replace(/[^0-9.\-]/g, "");
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
 function parseNumber(value: any, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function decodeHtmlEntities(text: string) {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 }
 
 function daysAgoIso(days: number) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString();
+}
+
+async function ensureCalendarTable(env: Env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS calendar_events (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       event_id TEXT UNIQUE,
+       summary TEXT,
+       start_time TEXT,
+       end_time TEXT,
+       html_link TEXT,
+       calendar_id TEXT,
+       created_at TEXT DEFAULT (datetime('now'))
+     )`
+  ).run();
+}
+
+function toIso(value: string | undefined | null): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+async function refreshCalendar(env: Env) {
+  if (!env.COMPOSIO_API_KEY || !env.COMPOSIO_CALENDAR_ACCOUNT_ID || !env.COMPOSIO_CALENDAR_ENTITY_ID) {
+    return;
+  }
+
+  const now = new Date();
+  const timeMin = now.toISOString();
+  const maxDate = new Date(now);
+  maxDate.setUTCDate(maxDate.getUTCDate() + 30);
+  const timeMax = maxDate.toISOString();
+
+  try {
+    await ensureCalendarTable(env);
+    const res = await fetch("https://backend.composio.dev/api/v3/tools/execute/GOOGLESUPER_FIND_EVENT", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.COMPOSIO_API_KEY,
+      },
+      body: JSON.stringify({
+        connected_account_id: env.COMPOSIO_CALENDAR_ACCOUNT_ID,
+        entity_id: env.COMPOSIO_CALENDAR_ENTITY_ID,
+        arguments: {
+          calendar_id: "primary",
+          timeMin,
+          timeMax,
+          single_events: true,
+          order_by: "startTime",
+          max_results: 50,
+        },
+      }),
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("Calendar fetch failed:", res.status, text.slice(0, 800));
+      return;
+    }
+    let payload: any = null;
+    try {
+      payload = JSON.parse(text);
+    } catch (e) {
+      console.error("Calendar response is not JSON:", text.slice(0, 800));
+      return;
+    }
+    const items =
+      payload?.data?.event_data?.event_data ||
+      payload?.data?.items ||
+      payload?.data?.events ||
+      payload?.items ||
+      [];
+
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    await env.DB.prepare("DELETE FROM calendar_events").run();
+    const insert = env.DB.prepare(
+      "INSERT OR REPLACE INTO calendar_events (event_id, summary, start_time, end_time, html_link, calendar_id) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+
+    for (const ev of items.slice(0, 50)) {
+      const eventId = ev.id || ev.event_id;
+      if (!eventId) continue;
+      const summary = ev.summary || ev.title || "Event";
+      const startRaw = ev.start?.dateTime || ev.start?.date || ev.start_time;
+      const endRaw = ev.end?.dateTime || ev.end?.date || ev.end_time;
+      const startIso = toIso(startRaw);
+      const endIso = toIso(endRaw);
+      if (!startIso) continue;
+      const link = ev.htmlLink || ev.html_link || null;
+      const calId = ev.organizer?.email || ev.calendar_id || "primary";
+      await insert.bind(eventId, summary, startIso, endIso, link, calId).run();
+    }
+  } catch (err) {
+    console.error("Failed to refresh calendar", err);
+  }
+}
+
+async function loadCalendarEvents(env: Env) {
+  try {
+    await ensureCalendarTable(env);
+    const nowIso = new Date().toISOString();
+    const { results } = await env.DB.prepare(
+      "SELECT summary, start_time, end_time, html_link FROM calendar_events WHERE start_time >= ? ORDER BY start_time ASC LIMIT 5"
+    )
+      .bind(nowIso)
+      .all<{
+        summary: string;
+        start_time: string;
+        end_time: string | null;
+        html_link: string | null;
+      }>();
+    return (results || []).map((r) => ({
+      title: r.summary,
+      start: r.start_time,
+      end: r.end_time,
+      url: r.html_link ?? null,
+    }));
+  } catch (err) {
+    console.error("Failed to load calendar events", err);
+    return [];
+  }
+}
+
+async function resolveChannelIdFromHandle(env: Env, handle: string): Promise<string | null> {
+  const sanitized = handle.replace(/^@/, "");
+  try {
+    const res = await fetch(`https://www.youtube.com/@${sanitized}`, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; D1Worker/1.0)" },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const matchId =
+      html.match(/"channelId":"(UC[^"]+)"/)?.[1] ||
+      html.match(/href="\/channel\/([^"]+)"/)?.[1] ||
+      html.match(/data-channel-external-id="(UC[^"]+)"/)?.[1];
+    return matchId || null;
+  } catch (e) {
+    console.error("Failed to resolve channel id from handle", e);
+    return null;
+  }
+}
+
+async function fetchLatestYoutubeVideos(env: Env): Promise<
+  {
+    title: string;
+    url: string;
+    publishedAt: string;
+    thumbnailUrl?: string | null;
+    videoId?: string | null;
+  }[]
+> {
+  const handle = env.YOUTUBE_SOURCE_HANDLE || "Varlamov.Travel";
+  const channelId =
+    env.YOUTUBE_SOURCE_CHANNEL_ID ||
+    env.COMPOSIO_YT_CHANNEL_ID ||
+    (await resolveChannelIdFromHandle(env, handle));
+
+  if (!channelId) return [];
+
+  try {
+    const rssUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+    const res = await fetch(rssUrl, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; D1Worker/1.0)" },
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const entries: {
+      title: string;
+      url: string;
+      publishedAt: string;
+      thumbnailUrl?: string | null;
+      videoId?: string | null;
+    }[] = [];
+    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+    let match: RegExpExecArray | null;
+    while ((match = entryRegex.exec(xml)) && entries.length < 3) {
+      const block = match[1];
+      const title = decodeHtmlEntities(block.match(/<title>([^<]+)<\/title>/)?.[1] || "Video");
+      const link = block.match(/<link[^>]+href="([^"]+)"/)?.[1] || "";
+      const publishedAt = block.match(/<published>([^<]+)<\/published>/)?.[1] || "";
+      const thumb =
+        block.match(/media:thumbnail[^>]+url="([^"]+)"/)?.[1] ||
+        block.match(/<media:thumbnail url='([^']+)'/i)?.[1] ||
+        null;
+      const videoId = block.match(/<yt:videoId>([^<]+)<\/yt:videoId>/)?.[1] || null;
+      entries.push({
+        title,
+        url: link,
+        publishedAt,
+        thumbnailUrl: thumb,
+        videoId,
+      });
+    }
+    return entries;
+  } catch (e) {
+    console.error("Failed to fetch YouTube RSS", e);
+    return [];
+  }
 }
 
 async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics | null> {
@@ -422,23 +688,31 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
   const baseUrl = "https://backend.composio.dev/api/v3/tools/execute";
 
   const callTool = async (tool: string, args: Record<string, any>) => {
+    const payload = {
+      connected_account_id: env.COMPOSIO_YT_ACCOUNT_ID,
+      entity_id: env.COMPOSIO_YT_ENTITY_ID,
+      arguments: args,
+    };
+
     const res = await fetch(`${baseUrl}/${tool}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-api-key": env.COMPOSIO_API_KEY!,
       },
-      body: JSON.stringify({
-        connected_account_id: env.COMPOSIO_YT_ACCOUNT_ID,
-        entity_id: env.COMPOSIO_YT_ENTITY_ID,
-        arguments: args,
-      }),
+      body: JSON.stringify(payload),
     });
+
+    const text = await res.text();
+
     if (!res.ok) {
-      const text = await res.text();
       throw new Error(`Composio tool ${tool} failed: ${res.status} ${text}`);
     }
-    return res.json();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error(`Composio tool ${tool} invalid JSON: ${text}`);
+    }
   };
 
   try {
@@ -504,43 +778,22 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
     }
 
     let topVideo: YoutubeMetrics["topVideo"] = null;
-    {
+    let videoViewsFromDetails = 0;
+    try {
       const videoId = TOP_VIDEO_ID;
-      const tryDetail = async (tool: string) => {
-        const videoStats = await callTool(tool, {
-          id: videoId,
-          part: "statistics,snippet",
-        });
-        const item = videoStats?.data?.items?.[0] ?? videoStats?.data?.videos?.[0];
-        const statsVideo = item?.statistics;
-        const snippet = item?.snippet;
-        const title = snippet?.title;
-        const publishedAt = snippet?.publishedAt;
-        const views = statsVideo?.viewCount !== undefined ? parseNumber(statsVideo?.viewCount, 0) : undefined;
-        if (title) {
-          return {
-            title,
-            views: views ?? 0,
-            publishedAt,
-            url: `https://youtube.com/watch?v=${videoId}`,
-            videoId,
-          };
-        }
-        return null;
-      };
-
-      try {
-        topVideo = (await tryDetail("YOUTUBE_GET_VIDEO_DETAILS")) || null;
-      } catch (_) {
-        topVideo = null;
-      }
-      if (!topVideo) {
-        try {
-          topVideo = await tryDetail("YOUTUBE_VIDEOS_LIST");
-        } catch (_) {
-          topVideo = null;
-        }
-      }
+      const videoResp = await callTool("YOUTUBE_VIDEO_DETAILS", {
+        id: videoId,
+        part: "snippet,statistics",
+      });
+      const item = videoResp?.data?.items?.[0] || videoResp?.data?.videos?.[0] || videoResp?.items?.[0];
+      const statsVideo = item?.statistics;
+      const views =
+        statsVideo?.viewCount !== undefined && statsVideo?.viewCount !== null
+          ? parseNumber(statsVideo.viewCount, 0)
+          : undefined;
+      if (views !== undefined) videoViewsFromDetails = Math.max(videoViewsFromDetails, views);
+    } catch (e) {
+      console.error("Video details fetch failed via v3 tool", e);
     }
 
     if (!stats) {
@@ -548,7 +801,8 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
       return null;
     }
 
-    const allTimeViews = parseNumber(stats.viewCount, 0);
+    const allTimeViewsRaw = parseNumber(stats.viewCount, 0);
+    const allTimeViews = videoViewsFromDetails > 0 ? videoViewsFromDetails : allTimeViewsRaw > 0 ? allTimeViewsRaw : 0;
     const subscribers = parseNumber(stats.subscriberCount, 0);
     const videoCount = parseNumber(stats.videoCount, 0);
 
@@ -652,6 +906,131 @@ async function upsertYoutubeSnapshot(env: Env, metrics: YoutubeMetrics) {
     await env.DB.prepare("UPDATE youtube_daily SET videos_total = ? WHERE updated_at = ?").bind(videoCount, nowIso).run();
   } catch (_) {
     // если колонки нет - пропускаем
+  }
+}
+
+async function refreshSalesFromSheets(env: Env): Promise<void> {
+  const spreadsheetId = env.SALES_SHEET_ID || "1AgeLC2KWxoxPPfhBsLaOdcSnkr4iB_VVuwveWt5yGOE";
+  const range = env.SALES_SHEET_RANGE || "Лист1!A:F";
+
+  const connectedAccountId = env.COMPOSIO_SHEETS_ACCOUNT_ID;
+  const entityId = env.COMPOSIO_SHEETS_ENTITY_ID;
+
+  if (!env.COMPOSIO_API_KEY || !connectedAccountId || !spreadsheetId) {
+    console.warn("Composio Sheets not configured, falling back to demo sales");
+    const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+    if (!existing) await refreshSalesDemo(env);
+    return;
+  }
+
+  try {
+    const res = await fetch("https://backend.composio.dev/api/v3/tools/execute/GOOGLESHEETS_BATCH_GET", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.COMPOSIO_API_KEY,
+      },
+      body: JSON.stringify({
+        connected_account_id: connectedAccountId,
+        entity_id: entityId,
+        arguments: {
+          spreadsheet_id: spreadsheetId,
+          ranges: [range],
+        },
+      }),
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("Sheets fetch failed:", res.status, text.slice(0, 800));
+      const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+      if (!existing) await refreshSalesDemo(env);
+      return;
+    }
+
+    let payload: any = null;
+    try {
+      payload = JSON.parse(text);
+    } catch (e) {
+      console.error("Sheets response is not JSON:", text.slice(0, 800));
+      const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+      if (!existing) await refreshSalesDemo(env);
+      return;
+    }
+
+    if (payload?.successful === false) {
+      console.error("Sheets tool unsuccessful:", String(payload?.error ?? "unknown error"));
+      const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+      if (!existing) await refreshSalesDemo(env);
+      return;
+    }
+
+    const spreadsheetData = payload?.data?.spreadsheet_data;
+    const valueRanges =
+      spreadsheetData?.valueRanges ??
+      spreadsheetData?.value_ranges ??
+      payload?.data?.valueRanges ??
+      payload?.data?.value_ranges;
+    const values =
+      (Array.isArray(valueRanges) ? valueRanges?.[0]?.values : valueRanges?.values) ||
+      spreadsheetData?.values ||
+      payload?.data?.values ||
+      [];
+
+    if (!Array.isArray(values) || values.length === 0) {
+      console.warn(
+        "Sheets returned empty values, payload snippet:",
+        JSON.stringify(payload).slice(0, 1500)
+      );
+      const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+      if (!existing) await refreshSalesDemo(env);
+      return;
+    }
+
+    const byDate: Record<
+      string,
+      { totalSales: number; revenueCents: number; profitCents: number }
+    > = {};
+
+    for (const row of values) {
+      if (!Array.isArray(row)) continue;
+      const date = String(row[0] ?? "").trim();
+      const status = String(row[5] ?? "").trim();
+      if (!status) continue;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+
+      const priceCents = moneyStringToCents(String(row[3] ?? ""));
+      const profitCents = moneyStringToCents(String(row[4] ?? ""));
+
+      if (!byDate[date]) byDate[date] = { totalSales: 0, revenueCents: 0, profitCents: 0 };
+      byDate[date].totalSales += 1;
+      byDate[date].revenueCents += priceCents;
+      byDate[date].profitCents += profitCents;
+    }
+
+    const dates = Object.keys(byDate).sort();
+    if (dates.length === 0) {
+      console.warn("No valid sales rows found in Sheets, falling back to demo sales");
+      const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+      if (!existing) await refreshSalesDemo(env);
+      return;
+    }
+
+    await env.DB.prepare("DELETE FROM sales_daily").run();
+    const insert = env.DB.prepare(
+      `INSERT INTO sales_daily (date, total_sales, total_revenue_cents, total_profit_cents, avg_profit_cents)
+       VALUES (?, ?, ?, ?, ?)`
+    );
+
+    for (const d of dates) {
+      const agg = byDate[d];
+      const avgProfitCents = agg.totalSales > 0 ? Math.round(agg.profitCents / agg.totalSales) : 0;
+      await insert.bind(d, agg.totalSales, agg.revenueCents, agg.profitCents, avgProfitCents).run();
+    }
+  } catch (err) {
+    console.error("Failed to refresh sales from Sheets, falling back to demo", err);
+    const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
+    if (!existing) await refreshSalesDemo(env);
   }
 }
 
