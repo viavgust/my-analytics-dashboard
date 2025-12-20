@@ -1,3 +1,6 @@
+export const dynamic = "force-dynamic"
+export const fetchCache = "force-no-store"
+
 import { HeroSection } from "@/components/hero-section"
 import { MetricCards } from "@/components/metric-cards"
 import { ChartsRow } from "@/components/charts-row"
