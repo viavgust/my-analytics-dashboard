@@ -9,6 +9,11 @@ type ChartsRowProps = {
 }
 
 export function ChartsRow({ sales }: ChartsRowProps) {
+  const values = sales.map((p) => Number(p.revenue) || 0)
+  const min = values.length ? Math.min(...values) : 0
+  const max = values.length ? Math.max(...values) : 0
+  const pad = Math.max(1, (max - min) * 0.15)
+
   return (
     <div className="grid grid-cols-1 gap-6 mb-4">
       <Card className="bg-gradient-to-br from-[#2a2520]/80 to-[#1e1a16]/80 backdrop-blur-xl border-white/10 rounded-2xl">
@@ -26,7 +31,7 @@ export function ChartsRow({ sales }: ChartsRowProps) {
                   </linearGradient>
                 </defs>
                 <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#6b7280", fontSize: 11 }} />
-                <YAxis hide />
+                <YAxis hide domain={[min - pad, max + pad]} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "#2a2520",
