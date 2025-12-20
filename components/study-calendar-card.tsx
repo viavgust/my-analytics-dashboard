@@ -11,6 +11,12 @@ function formatLocalTime(iso: string) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
 }
 
+function formatLocalDate(iso: string) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
 function buildWeekDays(events: DashboardCalendarEvent[]) {
   const today = new Date()
   const days = []
@@ -89,7 +95,7 @@ export function StudyCalendarCard({ events = [] }: Props) {
                   <div>
                     <p className="text-white text-sm line-clamp-1">{event.title}</p>
                     <p className="text-gray-500 text-xs">
-                      {formatLocalTime(event.start)}
+                      {formatLocalDate(event.start)} · {formatLocalTime(event.start)}
                       {event.end ? ` – ${formatLocalTime(event.end)}` : ""}
                     </p>
                   </div>

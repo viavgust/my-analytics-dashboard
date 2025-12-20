@@ -48,10 +48,16 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
         </CardHeader>
         <CardContent className="space-y-3">
           {(telegram.posts ?? []).map((post) => (
-            <div key={post.messageId} className="p-3 rounded-xl bg-white/5 border border-white/5">
+            <a
+              key={post.messageId}
+              href={post.url ?? "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition cursor-pointer"
+            >
               <p className="text-gray-300 text-sm line-clamp-1">{post.text}</p>
               <p className="text-gray-500 text-xs mt-1">{formatRelativeTime(post.publishedAt)}</p>
-            </div>
+            </a>
           ))}
         </CardContent>
       </Card>
@@ -72,7 +78,13 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
         <CardContent>
           <div className="space-y-2">
             {(youtube.latestVideos ?? []).slice(0, 3).map((video) => (
-              <div key={video.videoId ?? video.url} className="p-3 rounded-xl bg-white/5 border border-white/5 flex gap-3 items-center">
+              <a
+                key={video.videoId ?? video.url}
+                href={video.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="p-3 rounded-xl bg-white/5 border border-white/5 flex gap-3 items-center hover:bg-white/10 transition cursor-pointer"
+              >
                 {video.thumbnailUrl ? (
                   <img
                     src={video.thumbnailUrl}
@@ -86,7 +98,7 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
                   <p className="text-gray-300 text-sm line-clamp-1">{video.title}</p>
                   <p className="text-gray-500 text-xs mt-1">{formatRelativeTime(video.publishedAt)}</p>
                 </div>
-              </div>
+              </a>
             ))}
             {(youtube.latestVideos ?? []).length === 0 && (
               <div className="p-3 rounded-xl bg-white/5 border border-white/5">

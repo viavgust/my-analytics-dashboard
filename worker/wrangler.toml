@@ -23,3 +23,30 @@ COMPOSIO_SHEETS_ACCOUNT_ID = "ca_oDr5gIDBCSi_"
 COMPOSIO_SHEETS_ENTITY_ID = "pg-test-37d34f41-72d1-4f08-9025-f6bf44df7e08"
 COMPOSIO_CALENDAR_ACCOUNT_ID = "ca_aQVx514cpFuR"
 COMPOSIO_CALENDAR_ENTITY_ID = "pg-test-37d34f41-72d1-4f08-9025-f6bf44df7e08"
+
+[env.production]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "analytics_dashboard_db"
+database_id = "1ae258f9-b8db-46bb-8895-dcb1e59b1810"
+migrations_dir = "migrations"
+
+[env.production.triggers]
+crons = ["0 6 * * *"]
+
+[env.production.vars]
+TELEGRAM_CHANNEL_SLUG = "aipost"
+COMPOSIO_YT_AUTH_CONFIG_ID = "ac_3OdnKMkDjn3B"
+COMPOSIO_YT_ACCOUNT_ID = "ca_hNtAzNvxTYvR"
+COMPOSIO_YT_CHANNEL_ID = "UCVyIOrfaZHNFWSekiu3M8Hw"
+COMPOSIO_YT_ENTITY_ID = "pg-test-37d34f41-72d1-4f08-9025-f6bf44df7e08"
+COMPOSIO_YT_CHANNEL_HANDLE = "irina2755"
+YOUTUBE_SOURCE_HANDLE = "Varlamov.Travel"
+YOUTUBE_SOURCE_CHANNEL_ID = "UClusShJbD5SIMuoF9Ql5hOw"
+SALES_SHEET_ID = "1AgeLC2KWxoxPPfhBsLaOdcSnkr4iB_VVuwveWt5yGOE"
+SALES_SHEET_RANGE = "Лист1!A:F"
+COMPOSIO_SHEETS_ACCOUNT_ID = "ca_oDr5gIDBCSi_"
+COMPOSIO_SHEETS_ENTITY_ID = "pg-test-37d34f41-72d1-4f08-9025-f6bf44df7e08"
+COMPOSIO_CALENDAR_ACCOUNT_ID = "ca_aQVx514cpFuR"
+COMPOSIO_CALENDAR_ENTITY_ID = "pg-test-37d34f41-72d1-4f08-9025-f6bf44df7e08"
