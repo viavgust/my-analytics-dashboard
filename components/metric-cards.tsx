@@ -76,20 +76,6 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div className="p-3 rounded-xl bg-white/5 border border-white/5">
-              <p className="text-gray-500 text-xs">Subscribers</p>
-              <p className="text-xl font-bold mt-1 text-white">
-                {formatNumber(youtube.metrics.subscribers ?? 0, true)}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-white/5 border border-white/5">
-              <p className="text-gray-500 text-xs">Videos</p>
-              <p className="text-xl font-bold mt-1 text-white">
-                {formatNumber(youtube.metrics.videoCount ?? 0, true)}
-              </p>
-            </div>
-          </div>
           <div className="space-y-2">
             {(youtube.latestVideos ?? []).slice(0, 3).map((video) => (
               <a
