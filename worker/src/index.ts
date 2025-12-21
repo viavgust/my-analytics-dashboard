@@ -45,6 +45,27 @@ type YoutubeMetrics = {
 
 const TOP_VIDEO_ID = "_AMRlYI3Q-o";
 
+// Обновление всех источников (YouTube / Sheets / Telegram / Calendar) параллельно с таймаутами
+async function refreshAll(env: Env) {
+  await Promise.allSettled([
+    withTimeout(
+      (async () => {
+        const ytMetrics = await fetchYoutubeMetricsFromComposio(env);
+        if (ytMetrics) {
+          await upsertYoutubeSnapshot(env, ytMetrics);
+        } else {
+          await refreshYoutubeDemo(env);
+        }
+      })(),
+      10000,
+      "youtube"
+    ),
+    withTimeout(refreshSalesFromSheets(env), 10000, "sales"),
+    withTimeout(refreshTelegram(env), 8000, "telegram"),
+    withTimeout(refreshCalendar(env), 8000, "calendar"),
+  ]);
+}
+
 // Главный обработчик Worker-а
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -73,23 +94,7 @@ export default {
     if ((request.method === "POST" || request.method === "GET") && url.pathname === "/api/refresh") {
       console.log("Refresh called at", new Date().toISOString());
       console.log("Has COMPOSIO_API_KEY:", !!env.COMPOSIO_API_KEY);
-      await Promise.allSettled([
-        withTimeout(
-          (async () => {
-            const ytMetrics = await fetchYoutubeMetricsFromComposio(env);
-            if (ytMetrics) {
-              await upsertYoutubeSnapshot(env, ytMetrics);
-            } else {
-              await refreshYoutubeDemo(env);
-            }
-          })(),
-          10000,
-          "youtube"
-        ),
-        withTimeout(refreshSalesFromSheets(env), 10000, "sales"),
-        withTimeout(refreshTelegram(env), 8000, "telegram"),
-        withTimeout(refreshCalendar(env), 8000, "calendar"),
-      ]);
+      await refreshAll(env);
       return jsonResponse({
         ok: true,
         message: "Refresh completed (telegram/youtube/sales/calendar)",
@@ -99,6 +104,12 @@ export default {
     // Всё остальное — 404
     return new Response("Not found", { status: 404 });
   },
+};
+
+// Cron-хук Cloudflare: запускает тот же refresh раз в день (см. crons в wrangler.toml)
+export const scheduled = async (_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) => {
+  console.log("Scheduled refresh at", new Date().toISOString());
+  await refreshAll(env);
 };
 
 // Обработчик /api/dashboard
