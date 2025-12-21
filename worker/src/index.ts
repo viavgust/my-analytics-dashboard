@@ -73,16 +73,23 @@ export default {
     if ((request.method === "POST" || request.method === "GET") && url.pathname === "/api/refresh") {
       console.log("Refresh called at", new Date().toISOString());
       console.log("Has COMPOSIO_API_KEY:", !!env.COMPOSIO_API_KEY);
-      const ytMetrics = await fetchYoutubeMetricsFromComposio(env);
-      if (ytMetrics) {
-        await upsertYoutubeSnapshot(env, ytMetrics);
-      } else {
-        await refreshYoutubeDemo(env);
-      }
-
-      await refreshSalesFromSheets(env);
-      await refreshTelegram(env);
-      await refreshCalendar(env);
+      await Promise.allSettled([
+        withTimeout(
+          (async () => {
+            const ytMetrics = await fetchYoutubeMetricsFromComposio(env);
+            if (ytMetrics) {
+              await upsertYoutubeSnapshot(env, ytMetrics);
+            } else {
+              await refreshYoutubeDemo(env);
+            }
+          })(),
+          10000,
+          "youtube"
+        ),
+        withTimeout(refreshSalesFromSheets(env), 10000, "sales"),
+        withTimeout(refreshTelegram(env), 8000, "telegram"),
+        withTimeout(refreshCalendar(env), 8000, "calendar"),
+      ]);
       return jsonResponse({
         ok: true,
         message: "Refresh completed (telegram/youtube/sales/calendar)",
@@ -365,7 +372,7 @@ function buildDemoDashboardPayload() {
       },
       chart: {
         granularity: "month",
-        points: [
+      points: [
           { label: "Oct", views: 12000 },
           { label: "Nov", views: 18000 },
           { label: "Dec", views: 15000 },
@@ -376,25 +383,25 @@ function buildDemoDashboardPayload() {
       },
       latestVideos: [
         {
-          title: "Travel guide: hidden gems in the city",
-          url: "https://youtube.com/watch?v=demo1",
-          publishedAt: "2025-03-15T10:00:00Z",
-          thumbnailUrl: "https://i.ytimg.com/vi/demo1/hqdefault.jpg",
-          videoId: "demo1",
+          title: "«Битва экстрасенсов» породила монстров: как разводят астрологи, тарологи и целители? | Разоблачение",
+          url: "https://www.youtube.com/watch?v=XN9Wi7DogfE",
+          publishedAt: "2025-12-18T12:23:41+00:00",
+          thumbnailUrl: "https://i1.ytimg.com/vi/XN9Wi7DogfE/hqdefault.jpg",
+          videoId: "XN9Wi7DogfE",
         },
         {
-          title: "Weekend getaway highlights",
-          url: "https://youtube.com/watch?v=demo2",
-          publishedAt: "2025-03-14T08:30:00Z",
-          thumbnailUrl: "https://i.ytimg.com/vi/demo2/hqdefault.jpg",
-          videoId: "demo2",
+          title: "Атаки на школы Петербурга и Подмосковья. Будет хуже? | Ультраправые подростки, рост преступности",
+          url: "https://www.youtube.com/watch?v=ta5KSNnk0Gs",
+          publishedAt: "2025-12-16T16:52:50+00:00",
+          thumbnailUrl: "https://i1.ytimg.com/vi/ta5KSNnk0Gs/hqdefault.jpg",
+          videoId: "ta5KSNnk0Gs",
         },
         {
-          title: "Street food tour",
-          url: "https://youtube.com/watch?v=demo3",
-          publishedAt: "2025-03-12T18:00:00Z",
-          thumbnailUrl: "https://i.ytimg.com/vi/demo3/hqdefault.jpg",
-          videoId: "demo3",
+          title: "Чё Происходит #303 | Лукашенко отпустил заложников, любимое ***-видео россиян, срок для судей МУС",
+          url: "https://www.youtube.com/watch?v=BksOgy_vZo4",
+          publishedAt: "2025-12-14T13:53:26+00:00",
+          thumbnailUrl: "https://i3.ytimg.com/vi/BksOgy_vZo4/hqdefault.jpg",
+          videoId: "BksOgy_vZo4",
         },
       ],
     },
@@ -450,6 +457,21 @@ function moneyStringToCents(input: any): number {
 function parseNumber(value: any, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label = "task"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(timer);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(timer);
+        reject(e);
+      });
+  });
 }
 
 function decodeHtmlEntities(text: string) {
@@ -656,7 +678,7 @@ async function fetchLatestYoutubeVideos(env: Env): Promise<
       const videoId = block.match(/<yt:videoId>([^<]+)<\/yt:videoId>/)?.[1] || null;
       entries.push({
         title,
-        url: link,
+        url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : link,
         publishedAt,
         thumbnailUrl: thumb,
         videoId,
