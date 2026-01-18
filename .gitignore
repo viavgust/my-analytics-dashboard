@@ -11,3 +11,4 @@ yarn-error.log*
 .wrangler/
 .wrangler-state
 .wrangler-state/
+.dev.vars
