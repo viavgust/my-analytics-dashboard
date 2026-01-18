@@ -1010,6 +1010,11 @@ async function refreshSalesFromSheets(env: Env): Promise<void> {
       return;
     }
 
+    console.log("✅ Sheets data received:", values.length, "rows");
+    console.log("📊 First row:", JSON.stringify(values[0]));
+    console.log("📊 Last row:", JSON.stringify(values[values.length - 1]));
+    console.log("🔍 Range used:", range);
+
     const byDate: Record<
       string,
       { totalSales: number; revenueCents: number; profitCents: number }
@@ -1032,6 +1037,9 @@ async function refreshSalesFromSheets(env: Env): Promise<void> {
     }
 
     const dates = Object.keys(byDate).sort();
+    console.log("📅 Processed dates:", dates.length);
+    console.log("📅 Last 5 dates:", dates.slice(-5));
+    
     if (dates.length === 0) {
       console.warn("No valid sales rows found in Sheets, falling back to demo sales");
       const existing = await env.DB.prepare("SELECT 1 AS ok FROM sales_daily LIMIT 1").first();
