@@ -128,7 +128,7 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-4">
             <MetricItem label="Total sales" value={formatNumber(sales.metrics.totalSales)} />
             <MetricItem label="Total revenue" value={formatCurrency(sales.metrics.totalRevenue)} highlight />
@@ -136,8 +136,11 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
             <MetricItem label="Avg. profit" value={formatCurrency(sales.metrics.avgProfit)} />
           </div>
           {sales.chart.points.length > 0 && (
-            <div className="mt-3 text-xs text-gray-400">
-              Latest sale: {formatDate(sales.chart.points[sales.chart.points.length - 1].label)} · {formatCurrency(sales.chart.points[sales.chart.points.length - 1].revenue)}
+            <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-300">Latest sale</span>
+              <span className="text-sm text-gray-300">
+                {formatDate(sales.chart.points[sales.chart.points.length - 1].label)} • {formatCurrency(sales.chart.points[sales.chart.points.length - 1].revenue)}
+              </span>
             </div>
           )}
         </CardContent>
