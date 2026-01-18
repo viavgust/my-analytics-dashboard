@@ -30,6 +30,12 @@ function formatRelativeTime(publishedAt: string) {
   return `${diffDays}d ago`
 }
 
+function formatDate(dateString: string) {
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return dateString
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+}
+
 export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -129,6 +135,11 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
             <MetricItem label="Total profit" value={formatCurrency(sales.metrics.totalProfit)} />
             <MetricItem label="Avg. profit" value={formatCurrency(sales.metrics.avgProfit)} />
           </div>
+          {sales.chart.points.length > 0 && (
+            <div className="mt-3 text-xs text-gray-400">
+              Latest sale: {formatDate(sales.chart.points[sales.chart.points.length - 1].label)} · {formatCurrency(sales.chart.points[sales.chart.points.length - 1].revenue)}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
