@@ -136,11 +136,15 @@ export function MetricCards({ telegram, youtube, sales }: MetricCardsProps) {
             <MetricItem label="Avg. profit" value={formatCurrency(sales.metrics.avgProfit)} />
           </div>
           {sales.chart.points.length > 0 && (
-            <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between">
+            <div className="rounded-xl border border-white/5 bg-white/5 px-4 py-4 flex items-center justify-between gap-4">
               <span className="text-sm text-gray-500">Latest sale</span>
-              <span className="text-sm text-gray-300">
-                {formatDate(sales.chart.points[sales.chart.points.length - 1].label)} • <span className="text-xl font-bold text-white">{formatCurrency(sales.chart.points[sales.chart.points.length - 1].revenue)}</span>
-              </span>
+              <div className="flex items-baseline gap-3 text-sm text-gray-300">
+                <span>{formatDate(sales.chart.points[sales.chart.points.length - 1].label)}</span>
+                <span className="text-gray-600">·</span>
+                <span className="text-xl font-bold text-white leading-none">
+                  {formatCurrency(sales.chart.points[sales.chart.points.length - 1].revenue)}
+                </span>
+              </div>
             </div>
           )}
         </CardContent>
