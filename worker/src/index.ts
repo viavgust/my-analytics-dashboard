@@ -283,17 +283,26 @@ async function handleDashboard(env: Env): Promise<Response> {
               url: ytRow.top_video_url ?? undefined,
             }
           : null;
-      // временно используем демо-график, пока не строим из истории
-      youtubeChart = demoPayload.youtube.chart;
+      youtubeChart = {
+        granularity: "month",
+        points: [],
+      };
     } else {
-      youtubeMetrics = demoPayload.youtube.metrics;
-      youtubeChart = demoPayload.youtube.chart;
-      youtubeTopVideo = demoPayload.youtube.topVideo ?? null;
+      youtubeMetrics = {
+        viewsToday: 0,
+        views7d: 0,
+        views30d: 0,
+        allTimeViews: 0,
+        newVideos30d: 0,
+        subscribers: 0,
+      };
+      youtubeChart = {
+        granularity: "month",
+        points: [],
+      };
+      youtubeTopVideo = null;
     }
-    const youtubeLatestVideos =
-      latestVideos.length > 0
-        ? latestVideos
-        : demoPayload.youtube.latestVideos ?? [];
+    const youtubeLatestVideos = latestVideos.length > 0 ? latestVideos : [];
 
     // --- Sales / eBay метрики и график ---
 
