@@ -52,7 +52,8 @@ const TELEGRAM_PARSE_LIMIT = 24;
 const INSIGHTS_MIN = 6;
 const INSIGHTS_MAX = 8;
 const INSIGHTS_MIN_ACTION = 2;
-const INSIGHTS_MIN_EBAY = 4;
+const INSIGHTS_MIN_EBAY = 5;
+const INSIGHTS_MAX_EBAY = 5;
 const INSIGHTS_MIN_TELEGRAM = 1;
 const INSIGHTS_MAX_TELEGRAM = 2;
 const INSIGHTS_MAX_ACTIONS = 3;
@@ -966,8 +967,8 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       type: "action",
       period: "7d",
       title: "Перелистни медленные товары",
-      text: trimText("Перелистни товары с 0 продаж за 7д и добавь сильные ключи + бесплатную/скидочную доставку на 48 часов."),
-      actions: ["Найди товары с 0 продаж за 7д", "Перелистни с новым заголовком/фото", "Запусти 48ч промо на доставку"],
+      text: trimText("Освежи ассортимент: обнови фото и описания на медленных позициях, добавь небольшую скидку на доставку на 48 часов."),
+      actions: ["Обнови заголовки и фото на медленных позициях", "Введи 48ч скидку на доставку", "Проверь, остались ли неактуальные товары"],
     },
     {
       id: crypto.randomUUID(),
@@ -980,7 +981,20 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       text: trimText(
         "Проверь товары с низкой маржой и пересчитай доставку/цену, чтобы не уходить в минус на следующей неделе."
       ),
-      actions: ["Найди товары с маржой < 5%", "Повышай цену или убери дорогую доставку", "Протестируй наборы/бандлы"],
+      actions: ["Проверь тарифы доставки и упаковку", "Добавь +3–5% к цене на дорогих отправках", "Тестируй бандлы вместо одиночных отправок"],
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "ebay",
+      type: "money",
+      period: "7d",
+      title: "Средний чек под контролем",
+      text: trimText(
+        `Средний чек сейчас ~$${summary.avgOrder.toFixed(2)}. Поддержи его: акции на доптовары и небольшое повышение цен на популярные позиции.`
+      ),
+      actions: ["Предложи комплект/доптовар к основному", "Тестируй +2–3% к цене на популярных позициях"],
     },
   ];
 
@@ -1044,6 +1058,9 @@ function extractKeywords(text: string): string[] {
     "httpwww",
     "aipost",
     "tme",
+    "you",
+    "your",
+    "free",
   ]);
   const cleaned = stripMarkdownAndEmojis(text).toLowerCase();
   return cleaned
@@ -1056,22 +1073,21 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
   if (!posts || posts.length === 0) return [];
   const nowIso = new Date().toISOString();
 
-  const topThree = posts.slice(0, 3).map((p) => trimText(p.text, 80));
-  const topicsText = topThree.map((t) => (t ? `• ${t}` : "")).filter(Boolean).join(" ");
+  const toShortTopic = (text: string): string => {
+    const words = stripMarkdownAndEmojis(text)
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 4);
+    const phrase = words.join(" ");
+    return trimText(phrase ? `тема: ${phrase}` : "тема дня", 40);
+  };
 
-  const cards: InsightCard[] = [
-    {
-      id: crypto.randomUUID(),
-      createdAt: nowIso,
-      runDate,
-      source: "telegram",
-      type: "signal",
-      period: "today",
-      title: "Темы дня в Telegram",
-      text: trimText(topicsText ? `Сегодня обсуждают: ${topicsText}` : "Сегодня обсуждают новые темы."),
-      actions: ["Посмотри, можно ли подать товары под эти темы", "Подготовь 1 пост с ответом на интерес аудитории"],
-    },
-  ];
+  const top3: string[] = [];
+  for (const p of posts.slice(0, 3)) {
+    const t = toShortTopic(p.text || "");
+    if (t) top3.push(t);
+  }
+  while (top3.length < 3) top3.push("тема дня");
 
   // повтор темы 3 дня подряд (если доступно)
   const byDateTokens = new Map<string, Set<string>>();
@@ -1101,19 +1117,23 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
     }
   }
 
-  if (repeatedTopic) {
-    cards.push({
+  const topicsText = `Темы: • ${top3.join(" • ")}`;
+  const repeatedText = repeatedTopic ? ` Повторяется 3 дня: ${repeatedTopic}.` : "";
+  const conclusion = "Один вывод для тебя: зафиксируй интересные темы и вернись к ним позже.";
+
+  const cards: InsightCard[] = [
+    {
       id: crypto.randomUUID(),
       createdAt: nowIso,
       runDate,
       source: "telegram",
       type: "signal",
-      period: "week",
-      title: "Тема держится 3 дня",
-      text: trimText(`Повторяется тема: "${repeatedTopic}". Проверь, как её использовать в товарах/контенте.`),
-      actions: ["Добавь связку товара/поста под эту тему", "Протестируй ключи и фото под тему"],
-    });
-  }
+      period: "today",
+      title: "Темы дня в Telegram",
+      text: trimText(`${topicsText}.${repeatedText} ${conclusion}`),
+      actions: ["Сохранить темы в заметки", "Открыть посты и проверить контекст"],
+    },
+  ];
 
   return cards.slice(0, INSIGHTS_MAX_TELEGRAM);
 }
@@ -1121,9 +1141,11 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
 function buildYoutubeCard(videos: { title: string; url: string; publishedAt: string }[], runDate: string): InsightCard[] {
   if (!videos || videos.length === 0) return [];
   const nowIso = new Date().toISOString();
-  const titles = videos.slice(0, 3).map((v) => trimText(v.title, 70));
+  const titles = videos.slice(0, 3).map((v) => trimText(v.title, 60));
   const watchTitle = titles[0] || "новое видео";
-  const text = trimText(`Последние видео: ${titles.join("; ")}. Посмотри "${watchTitle}" и возьми идеи для описаний/фото.`);
+  const text = trimText(
+    `Что нового: ${titles.slice(0, 2).join("; ")}. Что посмотреть тебе: "${watchTitle}" — выпиши идеи.`
+  );
   return [
     {
       id: crypto.randomUUID(),
@@ -1132,9 +1154,9 @@ function buildYoutubeCard(videos: { title: string; url: string; publishedAt: str
       source: "youtube",
       type: "signal",
       period: "week",
-      title: "Что посмотреть на YouTube",
+      title: "Что нового на YouTube",
       text,
-      actions: ["Посмотри видео и выпиши 3 идеи", "Протестируй ключи и образы из этого видео"],
+      actions: ["Посмотри 15 минут и выпиши 3 идеи", "Сохрани важные моменты для описаний/ключей"],
     },
   ];
 }
@@ -1145,16 +1167,14 @@ function buildCalendarCard(events: { title: string; start: string; end: string |
   const first = events[0];
   const second = events[1];
   let text = "";
-  let actions: string[] = ["Заложи слот под eBay", "Держи буфер 15–30 минут между встречами"];
+  let actions: string[] = ["Заложи буфер 15–30 минут между делами", "Сгруппируй похожие задачи"];
 
   if (events.length >= 3) {
-    text = trimText(`Много дел в ближайшие дни (${events.length} событий). Запланируй 60 минут на eBay, чтобы не упустить продажи.`);
+    text = trimText(`Много дел в ближайшие дни (${events.length} событий). Добавь буфер и перенеси второстепенные задачи.`);
   } else if (first && second) {
-    text = trimText(
-      `Два события подряд: "${trimText(first.title, 40)}" и "${trimText(second.title, 40)}". Оставь 30 минут между ними под eBay.`
-    );
+    text = trimText(`Два события подряд: "${trimText(first.title, 40)}" и "${trimText(second.title, 40)}". Оставь 30 минут между ними.`);
   } else {
-    text = trimText(`Добавь час на eBay перед событием "${trimText(first.title, 50)}" на этой неделе.`);
+    text = trimText(`Добавь 30–60 минут перед событием "${trimText(first.title, 50)}", чтобы завершить дела спокойно.`);
   }
 
   return [
@@ -1165,7 +1185,7 @@ function buildCalendarCard(events: { title: string; start: string; end: string |
       source: "calendar",
       type: "plan",
       period: "week",
-      title: "Спланируй время под eBay",
+      title: "Спланируй время",
       text,
       actions,
     },
@@ -1221,9 +1241,15 @@ function normalizeInsights(
 
   // eBay first
   const ebayAi = fromAi.filter((c) => c.source === "ebay");
-  addFromPool(ebayAi, INSIGHTS_MAX);
+  addFromPool(ebayAi, INSIGHTS_MAX_EBAY);
   if (result.filter((c) => c.source === "ebay").length < INSIGHTS_MIN_EBAY) {
-    addFromPool(ebayFallback, INSIGHTS_MIN_EBAY - result.filter((c) => c.source === "ebay").length);
+    addFromPool(
+      ebayFallback,
+      Math.min(
+        INSIGHTS_MIN_EBAY - result.filter((c) => c.source === "ebay").length,
+        INSIGHTS_MAX_EBAY - result.filter((c) => c.source === "ebay").length
+      )
+    );
   }
 
   // ensure action count
@@ -1239,7 +1265,7 @@ function normalizeInsights(
   // Telegram 1-2
   const telegramAi = fromAi.filter((c) => c.source === "telegram");
   const telePool = [...telegramAi, ...telegramFallback];
-  const teleTarget = Math.min(INSIGHTS_MAX_TELEGRAM, telePool.length);
+  const teleTarget = telePool.length > 0 ? 1 : 0;
   addFromPool(telePool, teleTarget);
 
   // YouTube 1
@@ -1254,7 +1280,11 @@ function normalizeInsights(
 
   // Fill up to min/max with eBay fallbacks
   if (result.length < INSIGHTS_MIN) {
-    addFromPool([...ebayFallback, ...ebayAi], INSIGHTS_MAX);
+    const missing = Math.min(
+      INSIGHTS_MAX - result.length,
+      INSIGHTS_MAX_EBAY - result.filter((c) => c.source === "ebay").length
+    );
+    addFromPool([...ebayFallback, ...ebayAi], missing);
   }
 
   return result.slice(0, INSIGHTS_MAX);
@@ -1297,9 +1327,9 @@ Rules:
 - Язык: русский. Без HTML-сущностей, без markdown, без эмодзи.
 - Не придумывай item_id/SKU/title, если нет в данных. Используй только агрегаты (дни, недели, суммы).
 - Формулируй как инсайт + конкретное действие (коротко).
-- Telegram: 1-2 карточки как внешний сигнал (темы из постов, повтор темы 3 дня, привязка к eBay).
-- YouTube: 1 карточка по последним 3 видео (что посмотреть и почему полезно Ирине).
-- Calendar: 0-1 карточка, только если есть события (свободные слоты/перегруз).
+- Telegram: 1 карточка, 3 короткие темы дня + один вывод (без привязки к eBay).
+- YouTube: 1 карточка по последним видео: что нового + что посмотреть Ирине (одна рекомендация).
+- Calendar: 0-1 карточка, только если есть события (свободные слоты/перегруз), без привязки к eBay.
 - Если данных мало по источнику — не выдумывай, лучше пропусти.
 
 Data (JSON):
