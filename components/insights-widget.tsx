@@ -43,7 +43,7 @@ const typeLabels: Record<InsightCard["type"], string> = {
   money: "Деньги",
   margin: "Маржа",
   action: "Действие",
-  signal: "Сигнал",
+  signal: "Рекомендация",
   plan: "План",
 }
 

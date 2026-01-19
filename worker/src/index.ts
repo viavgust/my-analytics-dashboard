@@ -55,6 +55,7 @@ const INSIGHTS_MAX = 8;
 const INSIGHTS_MIN_ACTION = 2;
 const INSIGHTS_MIN_EBAY = 5;
 const INSIGHTS_MAX_EBAY = 5;
+const INSIGHTS_MONEY_TARGET = 2;
 const DEFAULT_INSIGHTS_LANG = "ru";
 const INSIGHTS_MIN_TELEGRAM = 1;
 const INSIGHTS_MAX_TELEGRAM = 2;
@@ -907,7 +908,7 @@ function sanitizeType(value: any): InsightCard["type"] {
 }
 
 function sanitizePeriod(value: any): InsightCard["period"] {
-  const allowed = new Set<InsightCard["period"]>(["today", "7d", "week", "30d"]);
+  const allowed = new Set<InsightCard["period"]>(["today", "7d", "week", "30d", "3d"]);
   if (allowed.has(value)) return value;
   const lower = typeof value === "string" ? value.toLowerCase() : "";
   if (allowed.has(lower as any)) return lower as InsightCard["period"];
@@ -1181,10 +1182,10 @@ function buildYoutubeCard(videos: { title: string; url: string; publishedAt: str
   if (!videos || videos.length === 0) return [];
   const nowIso = new Date().toISOString();
   const titles = videos.slice(0, 3).map((v) => trimText(v.title, 60));
-  const watchTitle = titles[0] || "новое видео";
-  const text = trimText(
-    `Что нового: ${titles.slice(0, 2).join("; ")}. Что посмотреть тебе: "${watchTitle}" — выпиши идеи.`
-  );
+  const priority = titles
+    .map((t, idx) => `${idx + 1}) ${t}`)
+    .join("; ");
+  const text = trimText(`Что нового: ${titles.slice(0, 3).join("; ")}. Приоритет просмотра: ${priority}.`);
   return [
     {
       id: crypto.randomUUID(),
@@ -1195,26 +1196,28 @@ function buildYoutubeCard(videos: { title: string; url: string; publishedAt: str
       period: "week",
       title: "Что нового на YouTube",
       text,
-      actions: ["Посмотри 15 минут и выпиши 3 идеи", "Сохрани важные моменты для описаний/ключей"],
+      actions: ["Посмотри 15 минут и выпиши 3 идеи", "Сохрани 1–2 тезиса по приоритетным видео"],
     },
   ];
 }
 
 function buildCalendarCard(events: { title: string; start: string; end: string | null }[], runDate: string): InsightCard[] {
-  if (!events || events.length === 0) return [];
+  if (!events) events = [];
   const nowIso = new Date().toISOString();
-  const first = events[0];
-  const second = events[1];
-  let text = "";
-  let actions: string[] = ["Заложи буфер 15–30 минут между делами", "Сгруппируй похожие задачи"];
+  const items = events.slice(0, 3).map((ev) => {
+    const start = ev.start ? new Date(ev.start) : null;
+    const day = start
+      ? start.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "2-digit" })
+      : "дата";
+    const time = start ? start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—";
+    return `${day} ${time} — ${trimText(ev.title || "Событие", 40)}`;
+  });
 
-  if (events.length >= 3) {
-    text = trimText(`Много дел в ближайшие дни (${events.length} событий). Добавь буфер и перенеси второстепенные задачи.`);
-  } else if (first && second) {
-    text = trimText(`Два события подряд: "${trimText(first.title, 40)}" и "${trimText(second.title, 40)}". Оставь 30 минут между ними.`);
-  } else {
-    text = trimText(`Добавь 30–60 минут перед событием "${trimText(first.title, 50)}", чтобы завершить дела спокойно.`);
-  }
+  const text =
+    items.length > 0
+      ? trimText(`Ближайшие события: ${items.join("; ")}`)
+      : "На ближайшие 3 дня событий нет — можно спокойно планировать.";
+  const actions: string[] = ["Поставить напоминание за 30 минут", "Добавить заметку к занятию (что подготовить)"];
 
   return [
     {
@@ -1223,8 +1226,8 @@ function buildCalendarCard(events: { title: string; start: string; end: string |
       runDate,
       source: "calendar",
       type: "plan",
-      period: "week",
-      title: "Спланируй время",
+      period: "3d",
+      title: "Расписание на 3 дня",
       text,
       actions,
     },
@@ -1278,33 +1281,21 @@ function normalizeInsights(
     }
   };
 
-  // eBay first
+  // eBay first (money then action)
   const ebayAi = fromAi.filter((c) => c.source === "ebay");
-  addFromPool(ebayAi, INSIGHTS_MAX_EBAY);
-  if (result.filter((c) => c.source === "ebay").length < INSIGHTS_MIN_EBAY) {
-    addFromPool(
-      ebayFallback,
-      Math.min(
-        INSIGHTS_MIN_EBAY - result.filter((c) => c.source === "ebay").length,
-        INSIGHTS_MAX_EBAY - result.filter((c) => c.source === "ebay").length
-      )
-    );
-  }
-
-  // ensure action count
-  const actionsNow = result.filter((c) => c.type === "action").length;
-  if (actionsNow < INSIGHTS_MIN_ACTION) {
-    addFromPool(
-      [...ebayAi, ...ebayFallback],
-      INSIGHTS_MIN_ACTION - actionsNow,
-      (c) => c.type === "action"
-    );
-  }
-
-  // ensure eBay count == 5 before other sources
+  const ebayMoneyPool = [...ebayAi, ...ebayFallback].filter((c) => c.type === "money");
+  const ebayActionPool = [...ebayAi, ...ebayFallback].filter((c) => c.type === "action");
+  addFromPool(ebayMoneyPool, INSIGHTS_MONEY_TARGET);
+  addFromPool(ebayActionPool, INSIGHTS_MAX_EBAY - result.filter((c) => c.source === "ebay").length);
+  // if still short, fill with any ebay to reach 5
   const ebayShort = result.filter((c) => c.source === "ebay").length;
   if (ebayShort < INSIGHTS_MAX_EBAY) {
-    addFromPool(ebayFallback, INSIGHTS_MAX_EBAY - ebayShort);
+    addFromPool([...ebayMoneyPool, ...ebayActionPool], INSIGHTS_MAX_EBAY - ebayShort);
+  }
+  // ensure action count
+  const actionsNow = result.filter((c) => c.source === "ebay" && c.type === "action").length;
+  if (actionsNow < INSIGHTS_MIN_ACTION) {
+    addFromPool(ebayActionPool, INSIGHTS_MIN_ACTION - actionsNow, (c) => c.type === "action");
   }
 
   // Telegram 1-2
