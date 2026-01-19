@@ -10,6 +10,7 @@ type HeroSectionProps = {
   updatedAt?: string
   workerUrl?: string
   workerError?: string | null
+  showDebug?: boolean
 }
 
 function formatUpdatedAt(updatedAt?: string) {
@@ -26,7 +27,7 @@ function formatUpdatedAt(updatedAt?: string) {
   return `Last update: ${formatted}`
 }
 
-export function HeroSection({ updatedAt, workerUrl, workerError }: HeroSectionProps) {
+export function HeroSection({ updatedAt, workerUrl, workerError, showDebug }: HeroSectionProps) {
   const router = useRouter()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -63,12 +64,16 @@ export function HeroSection({ updatedAt, workerUrl, workerError }: HeroSectionPr
         </Button>
         <div className="space-y-1 text-xs text-gray-300">
           <p className="text-gray-500">{formatUpdatedAt(updatedAt)}</p>
-          <p className="text-gray-400">
-            Data source: <span className="font-medium text-amber-100">Greek</span>
-            {" • Worker: "}
-            <span className={workerError ? "text-red-200" : "text-amber-100"}>{workerUrl ?? "not set"}</span>
-          </p>
-          {workerError ? <p className="text-red-300">{workerError}</p> : null}
+          {showDebug ? (
+            <>
+              <p className="text-gray-400">
+                Data source: <span className="font-medium text-amber-100">Greek</span>
+                {" • Worker: "}
+                <span className={workerError ? "text-red-200" : "text-amber-100"}>{workerUrl ?? "not set"}</span>
+              </p>
+              {workerError ? <p className="text-red-300">{workerError}</p> : null}
+            </>
+          ) : null}
         </div>
       </div>
     </div>

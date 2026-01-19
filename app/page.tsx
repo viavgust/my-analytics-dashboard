@@ -16,6 +16,7 @@ import {
 
 const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_PUBLIC_URL ?? null
 const WORKER_ERROR = WORKER_URL ? null : "Worker URL is not set"
+const SHOW_DEBUG = process.env.NEXT_PUBLIC_SHOW_DEBUG === "true"
 
 const FALLBACK_DASHBOARD: DashboardResponse = {
   updatedAt: "2025-03-15T09:15:00Z",
@@ -101,7 +102,12 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#1a1814] text-white p-6 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <HeroSection updatedAt={dashboard.updatedAt} workerUrl={WORKER_URL} workerError={WORKER_ERROR} />
+        <HeroSection
+          updatedAt={dashboard.updatedAt}
+          workerUrl={WORKER_URL}
+          workerError={WORKER_ERROR}
+          showDebug={SHOW_DEBUG}
+        />
         {WORKER_ERROR ? (
           <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
             {WORKER_ERROR}
