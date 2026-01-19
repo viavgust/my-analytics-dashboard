@@ -5,6 +5,7 @@ import { HeroSection } from "@/components/hero-section"
 import { MetricCards } from "@/components/metric-cards"
 import { ChartsRow } from "@/components/charts-row"
 import { StudyCalendarCard } from "@/components/study-calendar-card"
+import { InsightsWidget } from "@/components/insights-widget"
 import {
   type DashboardResponse,
   type DashboardTelegram,
@@ -106,6 +107,7 @@ export default async function DashboardPage() {
         <MetricCards telegram={telegram} youtube={youtube} sales={sales} />
         <ChartsRow sales={sales.chart.points} />
         <StudyCalendarCard events={calendar} />
+        <InsightsWidget workerUrl={WORKER_URL} />
       </div>
     </div>
   )

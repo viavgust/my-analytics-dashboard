@@ -3,6 +3,7 @@
 export interface Env {
   DB: D1Database;
   TELEGRAM_CHANNEL_SLUG?: string;
+  GEMINI_API_KEY?: string;
   COMPOSIO_API_KEY?: string;
   COMPOSIO_YT_AUTH_CONFIG_ID?: string;
   COMPOSIO_YT_ACCOUNT_ID?: string;
@@ -44,6 +45,12 @@ type YoutubeMetrics = {
 };
 
 const TOP_VIDEO_ID = "_AMRlYI3Q-o";
+const TELEGRAM_RETENTION_DAYS = 14;
+const TELEGRAM_MAX_POSTS = 30;
+const TELEGRAM_PARSE_LIMIT = 24;
+const INSIGHTS_MIN = 6;
+const INSIGHTS_MAX = 8;
+const INSIGHTS_MIN_ACTION = 2;
 
 // Обновление всех источников (YouTube / Sheets / Telegram / Calendar) параллельно с таймаутами
 async function refreshAll(env: Env) {
@@ -73,7 +80,8 @@ export default {
 
     // CORS preflight
     if (request.method === "OPTIONS") {
-      if (url.pathname === "/api/dashboard" || url.pathname === "/api/refresh") {
+      const corsPaths = ["/api/dashboard", "/api/refresh", "/api/insights/latest", "/api/insights/generate"];
+      if (corsPaths.includes(url.pathname)) {
         return new Response(null, {
           status: 204,
           headers: {
@@ -88,6 +96,14 @@ export default {
     // GET /api/dashboard — отдать данные для дашборда
     if (request.method === "GET" && url.pathname === "/api/dashboard") {
       return handleDashboard(env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/insights/latest") {
+      return handleInsightsLatest(env);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/insights/generate") {
+      return handleInsightsGenerate(env);
     }
 
     // POST /api/refresh — пока заглушка
@@ -110,6 +126,7 @@ export default {
 export const scheduled = async (_event: ScheduledEvent, env: Env, _ctx: ExecutionContext) => {
   console.log("Scheduled refresh at", new Date().toISOString());
   await refreshAll(env);
+  await generateAndStoreInsights(env, "cron");
 };
 
 // Обработчик /api/dashboard
@@ -321,11 +338,11 @@ async function handleDashboard(env: Env): Promise<Response> {
           }))
         : demoPayload.telegram.posts;
 
-  const payload = {
-    updatedAt,
-    telegram: {
-      channel: telegramChannel,
-      posts: telegramPosts,
+    const payload = {
+      updatedAt,
+      telegram: {
+        channel: telegramChannel,
+        posts: telegramPosts,
       },
       youtube: {
         metrics: youtubeMetrics,
@@ -439,7 +456,7 @@ function buildDemoDashboardPayload() {
 }
 
 // Утилита для JSON-ответа
-function jsonResponse(data: unknown, status = 200): Response {
+function jsonResponse(data: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -449,6 +466,126 @@ function jsonResponse(data: unknown, status = 200): Response {
       "Access-Control-Allow-Headers": "Content-Type",
     },
   });
+}
+
+type InsightCard = {
+  id: string;
+  createdAt: string;
+  runDate: string;
+  source: "ebay" | "telegram" | "youtube" | "calendar";
+  type: "money" | "margin" | "action" | "signal" | "plan";
+  period: "7d" | "30d" | "90d" | "180d" | "today" | "week";
+  title: string;
+  text: string;
+  actions: string[];
+  inputDigest?: string | null;
+};
+
+function getRunDate(date = new Date()): string {
+  const d = new Date(date);
+  return d.toISOString().slice(0, 10);
+}
+
+async function ensureAiInsightsTable(env: Env) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS ai_insights (
+       id TEXT PRIMARY KEY,
+       created_at TEXT DEFAULT (datetime('now')),
+       run_date TEXT NOT NULL,
+       source TEXT NOT NULL,
+       type TEXT NOT NULL,
+       period TEXT NOT NULL,
+       title TEXT NOT NULL,
+       text TEXT NOT NULL,
+       actions_json TEXT,
+       input_digest TEXT
+     )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_ai_insights_run_date ON ai_insights (run_date)`
+  ).run();
+}
+
+function parseActions(actionsJson: string | null | undefined): string[] {
+  if (!actionsJson) return [];
+  try {
+    const parsed = JSON.parse(actionsJson);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((a) => (typeof a === "string" ? a.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 6);
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function mapInsightRow(row: any): InsightCard {
+  return {
+    id: row.id,
+    createdAt: row.created_at ?? row.createdAt ?? new Date().toISOString(),
+    runDate: row.run_date ?? row.runDate ?? getRunDate(),
+    source: row.source ?? "ebay",
+    type: row.type ?? "action",
+    period: row.period ?? "7d",
+    title: row.title ?? "Insight",
+    text: row.text ?? "",
+    actions: Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json),
+    inputDigest: row.input_digest ?? row.inputDigest ?? null,
+  };
+}
+
+async function loadLatestInsights(env: Env): Promise<{ runDate: string | null; insights: InsightCard[] }> {
+  await ensureAiInsightsTable(env);
+  const latest = await env.DB.prepare("SELECT run_date FROM ai_insights ORDER BY run_date DESC LIMIT 1").first<{
+    run_date: string;
+  }>();
+  if (!latest?.run_date) return { runDate: null, insights: [] };
+
+  const { results } = await env.DB.prepare(
+    "SELECT id, created_at, run_date, source, type, period, title, text, actions_json, input_digest FROM ai_insights WHERE run_date = ? ORDER BY created_at DESC"
+  )
+    .bind(latest.run_date)
+    .all<any>();
+
+  return {
+    runDate: latest.run_date,
+    insights: (results || []).map(mapInsightRow),
+  };
+}
+
+async function storeInsights(env: Env, runDate: string, insights: InsightCard[], inputDigest?: string | null) {
+  await ensureAiInsightsTable(env);
+  await env.DB.prepare("DELETE FROM ai_insights WHERE run_date = ?").bind(runDate).run();
+  const insert = env.DB.prepare(
+    "INSERT INTO ai_insights (id, run_date, source, type, period, title, text, actions_json, input_digest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+  );
+  for (const card of insights) {
+    await insert
+      .bind(
+        card.id,
+        runDate,
+        card.source,
+        card.type,
+        card.period,
+        card.title,
+        card.text,
+        card.actions?.length ? JSON.stringify(card.actions.slice(0, 6)) : null,
+        inputDigest ?? card.inputDigest ?? null
+      )
+      .run();
+  }
+}
+
+async function buildInputDigest(payload: unknown): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(JSON.stringify(payload));
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 // Переводим центы в доллары с двумя знаками после запятой
@@ -468,6 +605,530 @@ function moneyStringToCents(input: any): number {
 function parseNumber(value: any, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+type SalesDailyRow = {
+  date: string;
+  total_sales: number;
+  total_revenue_cents: number;
+  total_profit_cents: number;
+  avg_profit_cents: number;
+};
+
+type SalesSummary = {
+  last7Revenue: number;
+  prev7Revenue: number;
+  last7Profit: number;
+  last30Revenue: number;
+  avgOrder: number;
+  bestProfitDay?: { date: string; profit: number } | null;
+  recentRevenue?: number;
+};
+
+type InsightInputBundle = {
+  sales: SalesDailyRow[];
+  telegram: { message_id: string; text: string; published_at: string }[];
+  youtubeVideos: {
+    title: string;
+    url: string;
+    publishedAt: string;
+    thumbnailUrl?: string | null;
+    videoId?: string | null;
+  }[];
+  youtubeMetrics:
+    | {
+        viewsToday: number;
+        views7d: number;
+        views30d: number;
+        allTimeViews: number;
+        subscribers: number;
+        newVideos30d: number;
+      }
+    | null;
+  calendar: { title: string; start: string; end?: string | null; url?: string | null }[];
+};
+
+function toDateUtc(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function diffDays(from: Date, to: Date): number {
+  const ms = to.getTime() - from.getTime();
+  return Math.floor(ms / (1000 * 60 * 60 * 24));
+}
+
+function computeSalesSummary(rows: SalesDailyRow[]): SalesSummary {
+  const now = new Date();
+  const last7 = rows.filter((r) => {
+    const d = toDateUtc(r.date);
+    return d ? diffDays(d, now) <= 6 : false;
+  });
+  const prev7 = rows.filter((r) => {
+    const d = toDateUtc(r.date);
+    if (!d) return false;
+    const delta = diffDays(d, now);
+    return delta >= 7 && delta <= 13;
+  });
+  const last30 = rows.filter((r) => {
+    const d = toDateUtc(r.date);
+    return d ? diffDays(d, now) <= 29 : false;
+  });
+
+  const sumBlock = (block: SalesDailyRow[]) => {
+    return block.reduce(
+      (acc, row) => {
+        acc.revenue += centsToDollars(row.total_revenue_cents);
+        acc.profit += centsToDollars(row.total_profit_cents);
+        acc.sales += parseNumber(row.total_sales, 0);
+        return acc;
+      },
+      { revenue: 0, profit: 0, sales: 0 }
+    );
+  };
+
+  const last7Agg = sumBlock(last7);
+  const prev7Agg = sumBlock(prev7);
+  const last30Agg = sumBlock(last30);
+
+  let bestProfitDay: { date: string; profit: number } | null = null;
+  for (const row of rows) {
+    const profit = centsToDollars(row.total_profit_cents);
+    if (!bestProfitDay || profit > bestProfitDay.profit) {
+      bestProfitDay = { date: row.date, profit };
+    }
+  }
+
+  const recent = rows[0];
+  const avgOrder =
+    last7Agg.sales > 0 ? Math.round((last7Agg.revenue / last7Agg.sales) * 100) / 100 : centsToDollars(recent?.avg_profit_cents || 0);
+
+  return {
+    last7Revenue: last7Agg.revenue,
+    prev7Revenue: prev7Agg.revenue,
+    last7Profit: last7Agg.profit,
+    last30Revenue: last30Agg.revenue,
+    avgOrder,
+    bestProfitDay,
+    recentRevenue: centsToDollars(recent?.total_revenue_cents ?? 0),
+  };
+}
+
+async function loadSalesHistory(env: Env): Promise<SalesDailyRow[]> {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT date, total_sales, total_revenue_cents, total_profit_cents, avg_profit_cents FROM sales_daily ORDER BY date DESC LIMIT 200"
+    ).all<SalesDailyRow>();
+    return results ?? [];
+  } catch (err) {
+    console.error("Failed to load sales history for insights", err);
+    return [];
+  }
+}
+
+async function loadTelegramHistory(env: Env): Promise<{ message_id: string; text: string; published_at: string }[]> {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT message_id, text, published_at FROM telegram_posts ORDER BY published_at DESC LIMIT 50"
+    ).all<{
+      message_id: string;
+      text: string;
+      published_at: string;
+    }>();
+    return results ?? [];
+  } catch (err) {
+    console.error("Failed to load telegram history for insights", err);
+    return [];
+  }
+}
+
+async function loadYoutubeMetrics(env: Env) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT views_today, views_7d, views_30d, views_all_time, subscribers, new_videos_30d FROM youtube_daily ORDER BY updated_at DESC LIMIT 1"
+    ).first<{
+      views_today: number;
+      views_7d: number;
+      views_30d: number;
+      views_all_time: number;
+      subscribers: number;
+      new_videos_30d: number;
+    }>();
+    if (!row) return null;
+    return {
+      viewsToday: parseNumber(row.views_today, 0),
+      views7d: parseNumber(row.views_7d, 0),
+      views30d: parseNumber(row.views_30d, 0),
+      allTimeViews: parseNumber(row.views_all_time, 0),
+      subscribers: parseNumber(row.subscribers, 0),
+      newVideos30d: parseNumber(row.new_videos_30d, 0),
+    };
+  } catch (err) {
+    console.error("Failed to load youtube metrics for insights", err);
+    return null;
+  }
+}
+
+async function collectInsightInputs(env: Env): Promise<InsightInputBundle> {
+  const [sales, telegram, youtubeVideos, calendar, youtubeMetrics] = await Promise.all([
+    loadSalesHistory(env),
+    loadTelegramHistory(env),
+    fetchLatestYoutubeVideos(env),
+    loadCalendarEvents(env),
+    loadYoutubeMetrics(env),
+  ]);
+
+  return {
+    sales,
+    telegram,
+    youtubeVideos,
+    youtubeMetrics,
+    calendar,
+  };
+}
+
+function trimText(text: string, max = 300) {
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+}
+
+function sanitizeSource(value: any): InsightCard["source"] {
+  const allowed = new Set<InsightCard["source"]>(["ebay", "telegram", "youtube", "calendar"]);
+  if (allowed.has(value)) return value;
+  const lower = typeof value === "string" ? value.toLowerCase() : "";
+  if (allowed.has(lower as any)) return lower as InsightCard["source"];
+  return "ebay";
+}
+
+function sanitizeType(value: any): InsightCard["type"] {
+  const allowed = new Set<InsightCard["type"]>(["money", "margin", "action", "signal", "plan"]);
+  if (allowed.has(value)) return value;
+  const lower = typeof value === "string" ? value.toLowerCase() : "";
+  if (allowed.has(lower as any)) return lower as InsightCard["type"];
+  return "action";
+}
+
+function sanitizePeriod(value: any): InsightCard["period"] {
+  const allowed = new Set<InsightCard["period"]>(["7d", "30d", "90d", "180d", "today", "week"]);
+  if (allowed.has(value)) return value;
+  const lower = typeof value === "string" ? value.toLowerCase() : "";
+  if (allowed.has(lower as any)) return lower as InsightCard["period"];
+  return "7d";
+}
+
+function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: InsightInputBundle): InsightCard[] {
+  const nowIso = new Date().toISOString();
+  const delta = summary.last7Revenue - summary.prev7Revenue;
+  const deltaPct = summary.prev7Revenue > 0 ? Math.round((delta / summary.prev7Revenue) * 100) : 0;
+
+  const telegramSample = inputs.telegram[0];
+  const youtubeSample = inputs.youtubeVideos[0];
+  const calendarSample = inputs.calendar[0];
+
+  const base: InsightCard[] = [
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "ebay",
+      type: "money",
+      period: "7d",
+      title: "7d revenue vs prev 7d",
+      text: trimText(
+        `Revenue ${summary.last7Revenue.toFixed(0)} vs ${summary.prev7Revenue.toFixed(0)} prev 7d (${delta >= 0 ? "+" : ""}${deltaPct}%). Keep avg order near $${summary.avgOrder.toFixed(2)}.`
+      ),
+      actions: [],
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "ebay",
+      type: "action",
+      period: "7d",
+      title: "Lift margin on best day",
+      text: trimText(
+        summary.bestProfitDay
+          ? `Best profit day ${summary.bestProfitDay.date}: $${summary.bestProfitDay.profit.toFixed(
+              0
+            )}. Repeat promo and raise prices +3–5% on top SKUs.`
+          : "Repeat last week’s top-margin day with a small price lift on best sellers."
+      ),
+      actions: ["Replay promo on best-profit items", "Add +3–5% price test", "Refresh photos/keywords on top 5 SKUs"],
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "ebay",
+      type: "action",
+      period: "7d",
+      title: "Re-list slow movers",
+      text: trimText(
+        "Re-list items with 0 sales last 7d and add stronger keywords + free/discounted shipping for 48h."
+      ),
+      actions: ["Find items with 0 sales 7d", "Re-list with new title/photos", "Run 48h shipping promo"],
+    },
+  ];
+
+  if (telegramSample) {
+    base.push({
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "telegram",
+      type: "signal",
+      period: "today",
+      title: "Telegram topic to echo",
+      text: trimText(`Mentioned today: "${trimText(telegramSample.text, 160)}". Mirror it in an eBay bundle title.`),
+      actions: ["Lift phrase into listing title", "Cross-link post to store", "Add image that matches topic"],
+    });
+  }
+
+  if (youtubeSample) {
+    base.push({
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "youtube",
+      type: "signal",
+      period: "7d",
+      title: "YouTube interest spike",
+      text: trimText(`Latest video: "${trimText(youtubeSample.title, 140)}". Add related accessory as upsell.`),
+      actions: ["Pin related product under the video", "Add coupon in video description", "Create matching store banner"],
+    });
+  }
+
+  if (calendarSample) {
+    base.push({
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "calendar",
+      type: "plan",
+      period: "week",
+      title: "Schedule eBay focus block",
+      text: trimText(
+        `Block 90 minutes before ${calendarSample.title || "next event"} to ship and reprice listings without overlap.`
+      ),
+      actions: ["Add 90m slot to calendar", "Batch shipping + repricing", "Confirm reminders on mobile"],
+    });
+  }
+
+  return base;
+}
+
+function normalizeInsights(
+  raw: any[],
+  runDate: string,
+  context: { summary: SalesSummary; inputs: InsightInputBundle }
+): InsightCard[] {
+  const nowIso = new Date().toISOString();
+  const normalized: InsightCard[] = [];
+
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const card: InsightCard = {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: sanitizeSource(item.source),
+      type: sanitizeType(item.type),
+      period: sanitizePeriod(item.period),
+      title: trimText(item.title || "Insight", 140),
+      text: trimText(item.text || ""),
+      actions: Array.isArray(item.actions)
+        ? item.actions
+            .map((a: any) => (typeof a === "string" ? a.trim() : ""))
+            .filter(Boolean)
+            .slice(0, 5)
+        : [],
+    };
+    normalized.push(card);
+    if (normalized.length >= INSIGHTS_MAX) break;
+  }
+
+  const fallbackPool = buildFallbackInsights(runDate, context.summary, context.inputs);
+
+  let ensureAction = normalized.filter((c) => c.type === "action").length;
+  let fallbackIdx = 0;
+
+  while (normalized.length < INSIGHTS_MIN && fallbackPool.length > 0) {
+    const baseCard = fallbackPool[fallbackIdx % fallbackPool.length];
+    normalized.push({
+      ...baseCard,
+      id: crypto.randomUUID(),
+      runDate,
+      createdAt: nowIso,
+    });
+    fallbackIdx += 1;
+  }
+
+  ensureAction = normalized.filter((c) => c.type === "action").length;
+
+  if (ensureAction < INSIGHTS_MIN_ACTION) {
+    let needed = INSIGHTS_MIN_ACTION - ensureAction;
+    for (const card of fallbackPool) {
+      if (needed <= 0) break;
+      if (card.type === "action" && !normalized.find((c) => c.title === card.title)) {
+        normalized.push(card);
+        needed -= 1;
+        ensureAction += 1;
+      }
+    }
+  }
+
+  const uniqueByTitle = new Map<string, InsightCard>();
+  for (const card of normalized) {
+    if (!uniqueByTitle.has(card.title)) uniqueByTitle.set(card.title, card);
+  }
+
+  return Array.from(uniqueByTitle.values()).slice(0, INSIGHTS_MAX);
+}
+
+function buildInsightsPrompt(inputs: InsightInputBundle, summary: SalesSummary): string {
+  const promptPayload = {
+    sales_summary: summary,
+    sales_points: inputs.sales.slice(0, 40),
+    telegram_posts: inputs.telegram.slice(0, 15).map((p) => ({
+      text: trimText(p.text, 180),
+      published_at: p.published_at,
+    })),
+    youtube_latest: inputs.youtubeVideos.slice(0, 5).map((v) => ({
+      title: trimText(v.title, 140),
+      publishedAt: v.publishedAt,
+    })),
+    calendar_upcoming: inputs.calendar.slice(0, 8),
+  };
+
+  return `
+You are an e-commerce copilot for Irina. Generate concise insight cards for her dashboard.
+Return STRICT JSON ONLY: an array with 6-8 objects, nothing else.
+
+Schema:
+[
+  {
+    "source": "ebay" | "telegram" | "youtube" | "calendar",
+    "type": "money" | "margin" | "action" | "signal" | "plan",
+    "period": "7d" | "30d" | "90d" | "180d" | "today" | "week",
+    "title": "short title",
+    "text": "<=300 chars, 1-2 sentences, clear and specific",
+    "actions": ["step 1", "step 2"]
+  }
+]
+
+Rules:
+- Produce 6-8 cards total.
+- At least 2 cards must have type="action".
+- Keep every text <= 300 chars.
+- Insights are for Irina's own store (not channel author analytics).
+- Prioritize eBay (money/margin/action). Use Telegram/YouTube as signals to help eBay. Calendar gives time-planning tips.
+
+Data (JSON):
+${JSON.stringify(promptPayload, null, 2)}
+`;
+}
+
+async function generateInsightsWithGemini(env: Env, inputs: InsightInputBundle, summary: SalesSummary): Promise<any[]> {
+  if (!env.GEMINI_API_KEY) return [];
+  const prompt = buildInsightsPrompt(inputs, summary);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }]}],
+        generationConfig: {
+          temperature: 0.5,
+          maxOutputTokens: 800,
+          responseMimeType: "application/json",
+        },
+      }),
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("Gemini returned error", res.status, text.slice(0, 500));
+      return [];
+    }
+
+    let payload: any = null;
+    try {
+      payload = JSON.parse(text);
+    } catch (_) {
+      payload = text;
+    }
+
+    const rawText =
+      payload?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      payload?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      (typeof payload === "string" ? payload : "");
+
+    if (!rawText) return [];
+
+    try {
+      const parsed = JSON.parse(rawText);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      console.error("Failed to parse Gemini JSON", err);
+      return [];
+    }
+  } catch (err) {
+    console.error("Gemini fetch failed", err);
+    return [];
+  }
+}
+
+async function generateAndStoreInsights(env: Env, trigger: string) {
+  const runDate = getRunDate();
+  const inputs = await collectInsightInputs(env);
+  const summary = computeSalesSummary(inputs.sales);
+  const aiRaw = await generateInsightsWithGemini(env, inputs, summary);
+
+  const insights = normalizeInsights(aiRaw, runDate, { summary, inputs });
+  const digest = await buildInputDigest({
+    runDate,
+    trigger,
+    summary,
+    sales: inputs.sales.slice(0, 60),
+    telegram: inputs.telegram.slice(0, 20),
+    youtube: inputs.youtubeVideos.slice(0, 5),
+    calendar: inputs.calendar.slice(0, 8),
+  });
+
+  await storeInsights(env, runDate, insights, digest);
+
+  return {
+    runDate,
+    generatedAt: new Date().toISOString(),
+    insights,
+  };
+}
+
+async function handleInsightsLatest(env: Env): Promise<Response> {
+  try {
+    const latest = await loadLatestInsights(env);
+    if (latest.insights.length > 0) return jsonResponse(latest);
+
+    const generated = await generateAndStoreInsights(env, "latest-fallback");
+    return jsonResponse({ runDate: generated.runDate, insights: generated.insights });
+  } catch (e: any) {
+    console.error("handleInsightsLatest error:", e.stack || e.message || e);
+    return jsonResponse({ error: "Internal error", message: String(e.message || e), stack: e.stack }, 500);
+  }
+}
+
+async function handleInsightsGenerate(env: Env): Promise<Response> {
+  try {
+    const generated = await generateAndStoreInsights(env, "manual");
+    return jsonResponse({ runDate: generated.runDate, insights: generated.insights });
+  } catch (e: any) {
+    console.error("handleInsightsGenerate error:", e.stack || e.message || e);
+    return jsonResponse({ error: "Internal error", message: String(e.message || e), stack: e.stack }, 500);
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label = "task"): Promise<T> {
@@ -1110,11 +1771,11 @@ async function refreshTelegram(env: Env) {
     },
   ];
 
-  const parseTelegramPosts = (html: string) => {
+  const parseTelegramPosts = (html: string, limit = TELEGRAM_PARSE_LIMIT) => {
     const result: { id: string; text: string; publishedAt: string }[] = [];
     const postRegex = /data-post="[^/]+\/(\d+)"[\s\S]*?datetime="([^"]+)"[\s\S]*?class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
     let match: RegExpExecArray | null;
-    while ((match = postRegex.exec(html)) && result.length < 3) {
+    while ((match = postRegex.exec(html)) && result.length < limit) {
       const [, id, datetime, rawText] = match;
       const text = rawText
         .replace(/<br\s*\/?>/gi, "\n")
@@ -1145,13 +1806,16 @@ async function refreshTelegram(env: Env) {
     console.error("Failed to fetch Telegram HTML, fallback to demo", err);
   }
 
-  await env.DB.prepare("DELETE FROM telegram_posts WHERE channel_slug = ?").bind(slug).run();
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - TELEGRAM_RETENTION_DAYS);
+  const cutoffIso = cutoff.toISOString();
+  await env.DB.prepare("DELETE FROM telegram_posts WHERE channel_slug = ? AND published_at < ?").bind(slug, cutoffIso).run();
 
   const insert = env.DB.prepare(
-    "INSERT INTO telegram_posts (channel_slug, message_id, text, published_at, message_url) VALUES (?, ?, ?, ?, ?)"
+    "INSERT OR REPLACE INTO telegram_posts (channel_slug, message_id, text, published_at, message_url) VALUES (?, ?, ?, ?, ?)"
   );
 
-  for (const post of posts.slice(0, 3)) {
+  for (const post of posts.slice(0, TELEGRAM_MAX_POSTS)) {
     await insert.bind(slug, post.message_id, post.text, post.published_at, post.message_url).run();
   }
 }
