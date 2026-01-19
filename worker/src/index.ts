@@ -19,6 +19,7 @@ export interface Env {
   COMPOSIO_CALENDAR_ACCOUNT_ID?: string;
   COMPOSIO_CALENDAR_ENTITY_ID?: string;
   DEMO_MODE?: string;
+  INSIGHTS_LANG?: string;
 }
 
 type YoutubeMetrics = {
@@ -54,6 +55,7 @@ const INSIGHTS_MAX = 8;
 const INSIGHTS_MIN_ACTION = 2;
 const INSIGHTS_MIN_EBAY = 5;
 const INSIGHTS_MAX_EBAY = 5;
+const DEFAULT_INSIGHTS_LANG = "ru";
 const INSIGHTS_MIN_TELEGRAM = 1;
 const INSIGHTS_MAX_TELEGRAM = 2;
 const INSIGHTS_MAX_ACTIONS = 3;
@@ -1074,12 +1076,49 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
   const nowIso = new Date().toISOString();
 
   const toShortTopic = (text: string): string => {
+    const stop = new Set([
+      "and",
+      "the",
+      "with",
+      "without",
+      "into",
+      "about",
+      "this",
+      "that",
+      "there",
+      "here",
+      "today",
+      "http",
+      "https",
+      "www",
+      "какой",
+      "какая",
+      "какие",
+      "что",
+      "это",
+      "как",
+      "для",
+      "или",
+      "чтобы",
+      "from",
+      "your",
+      "you",
+      "any",
+      "apps",
+      "officially",
+      "wikipedia",
+      "reporter",
+      "problem",
+    ]);
     const words = stripMarkdownAndEmojis(text)
+      .toLowerCase()
       .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 4);
+      .map((w) => w.replace(/[^a-zа-я0-9ё-]/gi, ""))
+      .filter((w) => w.length >= 3 && !stop.has(w))
+      .slice(0, 3);
     const phrase = words.join(" ");
-    return trimText(phrase ? `тема: ${phrase}` : "тема дня", 40);
+    const capitalized = phrase ? phrase.charAt(0).toUpperCase() + phrase.slice(1) : "Тема";
+    return trimText(capitalized || "Тема", 40);
   };
 
   const top3: string[] = [];
@@ -1117,7 +1156,7 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
     }
   }
 
-  const topicsText = `Темы: • ${top3.join(" • ")}`;
+  const topicsText = `Темы: 1) ${top3[0] || "—"}; 2) ${top3[1] || "—"}; 3) ${top3[2] || "—"}.`;
   const repeatedText = repeatedTopic ? ` Повторяется 3 дня: ${repeatedTopic}.` : "";
   const conclusion = "Один вывод для тебя: зафиксируй интересные темы и вернись к ним позже.";
 
@@ -1262,6 +1301,12 @@ function normalizeInsights(
     );
   }
 
+  // ensure eBay count == 5 before other sources
+  const ebayShort = result.filter((c) => c.source === "ebay").length;
+  if (ebayShort < INSIGHTS_MAX_EBAY) {
+    addFromPool(ebayFallback, INSIGHTS_MAX_EBAY - ebayShort);
+  }
+
   // Telegram 1-2
   const telegramAi = fromAi.filter((c) => c.source === "telegram");
   const telePool = [...telegramAi, ...telegramFallback];
@@ -1277,15 +1322,6 @@ function normalizeInsights(
   const calendarAi = fromAi.filter((c) => c.source === "calendar");
   if (calendarAi.length > 0) addFromPool(calendarAi, 1);
   else addFromPool(calendarFallback, 1);
-
-  // Fill up to min/max with eBay fallbacks
-  if (result.length < INSIGHTS_MIN) {
-    const missing = Math.min(
-      INSIGHTS_MAX - result.length,
-      INSIGHTS_MAX_EBAY - result.filter((c) => c.source === "ebay").length
-    );
-    addFromPool([...ebayFallback, ...ebayAi], missing);
-  }
 
   return result.slice(0, INSIGHTS_MAX);
 }
