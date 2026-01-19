@@ -1,10 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Bot, RefreshCw, Sparkles, X } from "lucide-react"
+import { Bot, RefreshCw, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Drawer,
   DrawerClose,
@@ -98,20 +97,23 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
 
   return (
     <Drawer direction="right" open={open} onOpenChange={setOpen}>
-      <Button
-        variant="secondary"
-        size="icon-lg"
-        className="group fixed bottom-4 right-4 z-[60] h-14 w-14 rounded-full bg-amber-400 text-gray-900 shadow-lg shadow-amber-500/30 hover:bg-amber-300 sm:top-4 sm:bottom-auto"
+      <button
+        type="button"
         onClick={() => setOpen(true)}
-        title="AI Insights"
+        className="group fixed bottom-4 right-4 z-[60] sm:top-4 sm:bottom-auto"
+        aria-label="AI Insights"
       >
-        <div className="relative flex items-center justify-center">
-          <Bot className="h-5 w-5" />
-          <Badge className="absolute -top-2 -right-2 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
+        <div className="relative">
+          <img
+            src="/robot-ai.svg"
+            alt="AI robot"
+            className="h-24 w-auto drop-shadow-[0_10px_20px_rgba(14,165,233,0.35)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:scale-[1.04]"
+          />
+          <Badge className="absolute -top-2 -right-3 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
             AI
           </Badge>
         </div>
-      </Button>
+      </button>
 
       <DrawerContent className="data-[vaul-drawer-direction=right]:w-[92vw] data-[vaul-drawer-direction=right]:sm:max-w-[420px] bg-[#1a1814] text-white border-l border-white/10 shadow-2xl shadow-black/40">
         <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4">
