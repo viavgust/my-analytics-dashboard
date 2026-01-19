@@ -98,36 +98,27 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
 
   return (
     <Drawer direction="right" open={open} onOpenChange={setOpen}>
-      <div className="fixed right-4 top-4 z-[60] w-[min(320px,calc(100vw-24px))] rounded-2xl border border-white/10 bg-gradient-to-r from-amber-500/10 via-white/5 to-amber-300/10 p-4 shadow-lg shadow-amber-900/10">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/15 text-amber-200 ring-1 ring-amber-200/30">
-              <Bot className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-white">AI Insights</p>
-              <p className="text-xs text-amber-100/80">Короткие подсказки по eBay, Telegram, YouTube</p>
-            </div>
-          </div>
-          <Button
-            variant="secondary"
-            className="rounded-full bg-amber-400 text-gray-900 shadow-md shadow-amber-500/30 hover:bg-amber-300"
-            onClick={() => setOpen(true)}
-          >
-            <Sparkles className="h-4 w-4" />
-            Открыть
-            <Badge className="ml-1 bg-gray-900 text-amber-200 hover:bg-gray-900">
-              {badgeContent}
-            </Badge>
-          </Button>
+      <Button
+        variant="secondary"
+        size="icon-lg"
+        className="group fixed bottom-4 right-4 z-[60] h-14 w-14 rounded-full bg-amber-400 text-gray-900 shadow-lg shadow-amber-500/30 hover:bg-amber-300 sm:top-4 sm:bottom-auto"
+        onClick={() => setOpen(true)}
+        title="AI Insights"
+      >
+        <div className="relative flex items-center justify-center">
+          <Bot className="h-5 w-5" />
+          <Badge className="absolute -top-2 -right-2 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
+            AI
+          </Badge>
         </div>
-      </div>
+      </Button>
 
       <DrawerContent className="data-[vaul-drawer-direction=right]:w-[92vw] data-[vaul-drawer-direction=right]:sm:max-w-[420px] bg-[#1a1814] text-white border-l border-white/10 shadow-2xl shadow-black/40">
         <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4">
           <div>
             <p className="text-xs uppercase tracking-[0.14em] text-amber-200/70">AI Insights</p>
-            <p className="text-sm text-amber-100/80">
+            <p className="text-sm text-amber-100/80">Инсайты и действия для дашборда</p>
+            <p className="text-[11px] text-amber-100/60">
               {runDate ? `Обновлено: ${runDate}` : "Последний прогон: —"}
             </p>
           </div>
