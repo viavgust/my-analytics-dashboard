@@ -76,49 +76,61 @@ async function refreshAll(env: Env) {
 // Главный обработчик Worker-а
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
 
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      const corsPaths = ["/api/dashboard", "/api/refresh", "/api/insights/latest", "/api/insights/generate"];
-      if (corsPaths.includes(url.pathname)) {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-          },
+      // CORS preflight
+      if (request.method === "OPTIONS") {
+        const corsPaths = ["/api/dashboard", "/api/refresh", "/api/insights/latest", "/api/insights/generate"];
+        if (corsPaths.includes(url.pathname)) {
+          return new Response(null, {
+            status: 204,
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type",
+            },
+          });
+        }
+      }
+
+      // GET /api/dashboard — отдать данные для дашборда
+      if (request.method === "GET" && url.pathname === "/api/dashboard") {
+        return handleDashboard(env);
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/insights/latest") {
+        return handleInsightsLatest(env);
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/insights/generate") {
+        return handleInsightsGenerate(env);
+      }
+
+      // POST /api/refresh — пока заглушка
+      if ((request.method === "POST" || request.method === "GET") && url.pathname === "/api/refresh") {
+        console.log("Refresh called at", new Date().toISOString());
+        console.log("Has COMPOSIO_API_KEY:", !!env.COMPOSIO_API_KEY);
+        await refreshAll(env);
+        return jsonResponse({
+          ok: true,
+          message: "Refresh completed (telegram/youtube/sales/calendar)",
         });
       }
-    }
 
-    // GET /api/dashboard — отдать данные для дашборда
-    if (request.method === "GET" && url.pathname === "/api/dashboard") {
-      return handleDashboard(env);
+      // Всё остальное — 404
+      return new Response("Not found", { status: 404 });
+    } catch (err: any) {
+      console.error("Unhandled fetch error", err);
+      return jsonResponse(
+        {
+          error: "Unhandled",
+          message: String(err?.message || err),
+          stack: err?.stack,
+        },
+        500
+      );
     }
-
-    if (request.method === "GET" && url.pathname === "/api/insights/latest") {
-      return handleInsightsLatest(env);
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/insights/generate") {
-      return handleInsightsGenerate(env);
-    }
-
-    // POST /api/refresh — пока заглушка
-    if ((request.method === "POST" || request.method === "GET") && url.pathname === "/api/refresh") {
-      console.log("Refresh called at", new Date().toISOString());
-      console.log("Has COMPOSIO_API_KEY:", !!env.COMPOSIO_API_KEY);
-      await refreshAll(env);
-      return jsonResponse({
-        ok: true,
-        message: "Refresh completed (telegram/youtube/sales/calendar)",
-      });
-    }
-
-    // Всё остальное — 404
-    return new Response("Not found", { status: 404 });
   },
 };
 
@@ -486,24 +498,30 @@ function getRunDate(date = new Date()): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function ensureAiInsightsTable(env: Env) {
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS ai_insights (
-       id TEXT PRIMARY KEY,
-       created_at TEXT DEFAULT (datetime('now')),
-       run_date TEXT NOT NULL,
-       source TEXT NOT NULL,
-       type TEXT NOT NULL,
-       period TEXT NOT NULL,
-       title TEXT NOT NULL,
-       text TEXT NOT NULL,
-       actions_json TEXT,
-       input_digest TEXT
-     )`
-  ).run();
-  await env.DB.prepare(
-    `CREATE INDEX IF NOT EXISTS idx_ai_insights_run_date ON ai_insights (run_date)`
-  ).run();
+async function ensureAiInsightsTable(env: Env): Promise<boolean> {
+  try {
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_insights (
+         id TEXT PRIMARY KEY,
+         created_at TEXT DEFAULT (datetime('now')),
+         run_date TEXT NOT NULL,
+         source TEXT NOT NULL,
+         type TEXT NOT NULL,
+         period TEXT NOT NULL,
+         title TEXT NOT NULL,
+         text TEXT NOT NULL,
+         actions_json TEXT,
+         input_digest TEXT
+       )`
+    ).run();
+    await env.DB.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_ai_insights_run_date ON ai_insights (run_date)`
+    ).run();
+    return true;
+  } catch (err) {
+    console.error("ensureAiInsightsTable failed", err);
+    return false;
+  }
 }
 
 function parseActions(actionsJson: string | null | undefined): string[] {
@@ -538,44 +556,61 @@ function mapInsightRow(row: any): InsightCard {
 }
 
 async function loadLatestInsights(env: Env): Promise<{ runDate: string | null; insights: InsightCard[] }> {
-  await ensureAiInsightsTable(env);
-  const latest = await env.DB.prepare("SELECT run_date FROM ai_insights ORDER BY run_date DESC LIMIT 1").first<{
-    run_date: string;
-  }>();
-  if (!latest?.run_date) return { runDate: null, insights: [] };
+  const ok = await ensureAiInsightsTable(env);
+  if (!ok) {
+    return { runDate: null, insights: [] };
+  }
 
-  const { results } = await env.DB.prepare(
-    "SELECT id, created_at, run_date, source, type, period, title, text, actions_json, input_digest FROM ai_insights WHERE run_date = ? ORDER BY created_at DESC"
-  )
-    .bind(latest.run_date)
-    .all<any>();
+  try {
+    const latest = await env.DB.prepare("SELECT run_date FROM ai_insights ORDER BY run_date DESC LIMIT 1").first<{
+      run_date: string;
+    }>();
+    if (!latest?.run_date) return { runDate: null, insights: [] };
 
-  return {
-    runDate: latest.run_date,
-    insights: (results || []).map(mapInsightRow),
-  };
+    const { results } = await env.DB.prepare(
+      "SELECT id, created_at, run_date, source, type, period, title, text, actions_json, input_digest FROM ai_insights WHERE run_date = ? ORDER BY created_at DESC"
+    )
+      .bind(latest.run_date)
+      .all<any>();
+
+    return {
+      runDate: latest.run_date,
+      insights: (results || []).map(mapInsightRow),
+    };
+  } catch (err) {
+    console.error("loadLatestInsights failed", err);
+    return { runDate: null, insights: [] };
+  }
 }
 
 async function storeInsights(env: Env, runDate: string, insights: InsightCard[], inputDigest?: string | null) {
-  await ensureAiInsightsTable(env);
-  await env.DB.prepare("DELETE FROM ai_insights WHERE run_date = ?").bind(runDate).run();
-  const insert = env.DB.prepare(
-    "INSERT INTO ai_insights (id, run_date, source, type, period, title, text, actions_json, input_digest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
-  );
-  for (const card of insights) {
-    await insert
-      .bind(
-        card.id,
-        runDate,
-        card.source,
-        card.type,
-        card.period,
-        card.title,
-        card.text,
-        card.actions?.length ? JSON.stringify(card.actions.slice(0, 6)) : null,
-        inputDigest ?? card.inputDigest ?? null
-      )
-      .run();
+  const ok = await ensureAiInsightsTable(env);
+  if (!ok) {
+    console.warn("Insights table unavailable, skip persisting");
+    return;
+  }
+  try {
+    await env.DB.prepare("DELETE FROM ai_insights WHERE run_date = ?").bind(runDate).run();
+    const insert = env.DB.prepare(
+      "INSERT INTO ai_insights (id, run_date, source, type, period, title, text, actions_json, input_digest) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+    );
+    for (const card of insights) {
+      await insert
+        .bind(
+          card.id,
+          runDate,
+          card.source,
+          card.type,
+          card.period,
+          card.title,
+          card.text,
+          card.actions?.length ? JSON.stringify(card.actions.slice(0, 6)) : null,
+          inputDigest ?? card.inputDigest ?? null
+        )
+        .run();
+    }
+  } catch (err) {
+    console.error("storeInsights failed", err);
   }
 }
 
@@ -1117,7 +1152,28 @@ async function handleInsightsLatest(env: Env): Promise<Response> {
     return jsonResponse({ runDate: generated.runDate, insights: generated.insights });
   } catch (e: any) {
     console.error("handleInsightsLatest error:", e.stack || e.message || e);
-    return jsonResponse({ error: "Internal error", message: String(e.message || e), stack: e.stack }, 500);
+    try {
+      const runDate = getRunDate();
+      const inputs =
+        (await collectInsightInputs(env).catch(() => null)) ?? {
+          sales: [],
+          telegram: [],
+          youtubeVideos: [],
+          youtubeMetrics: null,
+          calendar: [],
+        };
+      const summary = computeSalesSummary(inputs.sales ?? []);
+      const fallback = normalizeInsights([], runDate, { summary, inputs });
+      return jsonResponse({
+        runDate,
+        insights: fallback,
+        error: "fallback",
+        message: String(e?.message || e),
+      });
+    } catch (fallbackErr: any) {
+      console.error("handleInsightsLatest fallback failed:", fallbackErr.stack || fallbackErr.message || fallbackErr);
+      return jsonResponse({ error: "Internal error", message: String(e?.message || e) }, 500);
+    }
   }
 }
 
@@ -1127,7 +1183,28 @@ async function handleInsightsGenerate(env: Env): Promise<Response> {
     return jsonResponse({ runDate: generated.runDate, insights: generated.insights });
   } catch (e: any) {
     console.error("handleInsightsGenerate error:", e.stack || e.message || e);
-    return jsonResponse({ error: "Internal error", message: String(e.message || e), stack: e.stack }, 500);
+    try {
+      const runDate = getRunDate();
+      const inputs =
+        (await collectInsightInputs(env).catch(() => null)) ?? {
+          sales: [],
+          telegram: [],
+          youtubeVideos: [],
+          youtubeMetrics: null,
+          calendar: [],
+        };
+      const summary = computeSalesSummary(inputs.sales ?? []);
+      const fallback = normalizeInsights([], runDate, { summary, inputs });
+      return jsonResponse({
+        runDate,
+        insights: fallback,
+        error: "fallback",
+        message: String(e?.message || e),
+      });
+    } catch (fallbackErr: any) {
+      console.error("handleInsightsGenerate fallback failed:", fallbackErr.stack || fallbackErr.message || fallbackErr);
+      return jsonResponse({ error: "Internal error", message: String(e.message || e), stack: e.stack }, 500);
+    }
   }
 }
 

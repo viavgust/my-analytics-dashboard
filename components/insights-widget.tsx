@@ -77,12 +77,20 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
       const res = await fetch(`${baseUrl}/api/insights/${mode === "latest" ? "latest" : "generate"}`, {
         method: mode === "latest" ? "GET" : "POST",
       })
-      const json = (await res.json()) as InsightsResponse
-      setInsights(json.insights ?? [])
-      setRunDate(json.runDate ?? null)
+      const isJson = res.headers.get("content-type")?.includes("application/json")
+      const json = (isJson ? await res.json() : null) as InsightsResponse | null
+
+      if (!res.ok) {
+        const detail = (json as any)?.message || (json as any)?.error || res.statusText
+        throw new Error(`HTTP ${res.status}${detail ? `: ${detail}` : ""}`)
+      }
+
+      setInsights(json?.insights ?? [])
+      setRunDate(json?.runDate ?? null)
     } catch (err: any) {
       console.error("Insights fetch failed", err)
-      setError("Не удалось загрузить инсайты. Попробуй обновить позже.")
+      const message = err?.message ? ` (${err.message})` : ""
+      setError(`Не удалось загрузить инсайты${message}`)
     } finally {
       setLoading(false)
     }
