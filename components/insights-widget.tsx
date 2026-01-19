@@ -40,20 +40,20 @@ const sourceStyles: Record<
 }
 
 const typeLabels: Record<InsightCard["type"], string> = {
-  money: "Money",
-  margin: "Margin",
-  action: "Action",
-  signal: "Signal",
-  plan: "Plan",
+  money: "Деньги",
+  margin: "Маржа",
+  action: "Действие",
+  signal: "Сигнал",
+  plan: "План",
 }
 
 const periodLabels: Record<InsightCard["period"], string> = {
-  "7d": "7d",
-  "30d": "30d",
-  "90d": "90d",
-  "180d": "180d",
-  today: "Today",
-  week: "Week",
+  "7d": "7 дней",
+  "30d": "30 дней",
+  "90d": "90 дней",
+  "180d": "180 дней",
+  today: "Сегодня",
+  week: "Неделя",
 }
 
 export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {

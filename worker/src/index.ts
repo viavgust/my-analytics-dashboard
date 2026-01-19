@@ -51,6 +51,8 @@ const TELEGRAM_PARSE_LIMIT = 24;
 const INSIGHTS_MIN = 6;
 const INSIGHTS_MAX = 8;
 const INSIGHTS_MIN_ACTION = 2;
+const MAX_TITLE_LENGTH = 60;
+const MAX_TEXT_LENGTH = 300;
 
 // Обновление всех источников (YouTube / Sheets / Telegram / Calendar) параллельно с таймаутами
 async function refreshAll(env: Env) {
@@ -540,6 +542,42 @@ function parseActions(actionsJson: string | null | undefined): string[] {
   }
 }
 
+function stripMarkdownAndEmojis(input: string): string {
+  const noMarkdownLinks = input.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+  const noMarkdown = noMarkdownLinks.replace(/[*_`~>#]+/g, " ");
+  const noHtmlTags = noMarkdown.replace(/<\/?[^>]+>/g, " ");
+  const noEntities = decodeHtmlEntities(noHtmlTags)
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'");
+  const noEmojis = noEntities.replace(/\p{Extended_Pictographic}/gu, "");
+  return noEmojis.replace(/\s+/g, " ").trim();
+}
+
+function sanitizeTextField(value: any, maxLen = MAX_TEXT_LENGTH): string {
+  const text = typeof value === "string" ? value : "";
+  if (!text) return "";
+  const cleaned = stripMarkdownAndEmojis(text);
+  if (cleaned.length <= maxLen) return cleaned;
+  return `${cleaned.slice(0, Math.max(0, maxLen - 3))}...`;
+}
+
+function sanitizeTitleField(value: any): string {
+  const title = sanitizeTextField(value, MAX_TITLE_LENGTH);
+  return title || "Инсайт";
+}
+
+function sanitizeActionsField(actions: any): string[] {
+  if (!Array.isArray(actions)) return [];
+  const cleaned = actions
+    .map((a) => sanitizeTextField(typeof a === "string" ? a : "", 120))
+    .filter(Boolean);
+  return cleaned.slice(0, 6);
+}
+
 function mapInsightRow(row: any): InsightCard {
   return {
     id: row.id,
@@ -548,9 +586,9 @@ function mapInsightRow(row: any): InsightCard {
     source: row.source ?? "ebay",
     type: row.type ?? "action",
     period: row.period ?? "7d",
-    title: row.title ?? "Insight",
-    text: row.text ?? "",
-    actions: Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json),
+    title: sanitizeTitleField(row.title ?? "Insight"),
+    text: sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
+    actions: sanitizeActionsField(Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json)),
     inputDigest: row.input_digest ?? row.inputDigest ?? null,
   };
 }
@@ -826,7 +864,8 @@ async function collectInsightInputs(env: Env): Promise<InsightInputBundle> {
 
 function trimText(text: string, max = 300) {
   if (!text) return "";
-  return text.length > max ? `${text.slice(0, max - 3)}...` : text;
+  const cleaned = stripMarkdownAndEmojis(text);
+  return cleaned.length > max ? `${cleaned.slice(0, Math.max(0, max - 3))}...` : cleaned;
 }
 
 function sanitizeSource(value: any): InsightCard["source"] {
@@ -861,6 +900,9 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
   const telegramSample = inputs.telegram[0];
   const youtubeSample = inputs.youtubeVideos[0];
   const calendarSample = inputs.calendar[0];
+  const telegramTopic = telegramSample ? trimText(telegramSample.text, 120) : "";
+  const telegramHasLatin = /[A-Za-z]{6,}/.test(telegramTopic);
+  const telegramTextPart = telegramHasLatin ? "" : telegramTopic ? `: "${telegramTopic}"` : "";
 
   const base: InsightCard[] = [
     {
@@ -870,9 +912,9 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       source: "ebay",
       type: "money",
       period: "7d",
-      title: "7d revenue vs prev 7d",
+      title: "Выручка 7д vs пред. 7д",
       text: trimText(
-        `Revenue ${summary.last7Revenue.toFixed(0)} vs ${summary.prev7Revenue.toFixed(0)} prev 7d (${delta >= 0 ? "+" : ""}${deltaPct}%). Keep avg order near $${summary.avgOrder.toFixed(2)}.`
+        `Выручка ${summary.last7Revenue.toFixed(0)} против ${summary.prev7Revenue.toFixed(0)} за прошлые 7д (${delta >= 0 ? "+" : ""}${deltaPct}%). Держи средний чек около $${summary.avgOrder.toFixed(2)}.`
       ),
       actions: [],
     },
@@ -883,15 +925,19 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       source: "ebay",
       type: "action",
       period: "7d",
-      title: "Lift margin on best day",
+      title: "Подними маржу в лучший день",
       text: trimText(
         summary.bestProfitDay
-          ? `Best profit day ${summary.bestProfitDay.date}: $${summary.bestProfitDay.profit.toFixed(
+          ? `Лучший день по прибыли ${summary.bestProfitDay.date}: $${summary.bestProfitDay.profit.toFixed(
               0
-            )}. Repeat promo and raise prices +3–5% on top SKUs.`
-          : "Repeat last week’s top-margin day with a small price lift on best sellers."
+            )}. Повтори промо и подними цены на топ-товары на +3–5%.`
+          : "Повтори лучший день прошлой недели и подними цены на топ-товары на +3–5%."
       ),
-      actions: ["Replay promo on best-profit items", "Add +3–5% price test", "Refresh photos/keywords on top 5 SKUs"],
+      actions: [
+        "Повтори промо на товарах с лучшей прибылью",
+        "Сделай тест +3–5% к цене",
+        "Обнови фото и ключи в топ-5 товаров",
+      ],
     },
     {
       id: crypto.randomUUID(),
@@ -900,11 +946,22 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       source: "ebay",
       type: "action",
       period: "7d",
-      title: "Re-list slow movers",
+      title: "Перелистни медленные товары",
+      text: trimText("Перелистни товары с 0 продаж за 7д и добавь сильные ключи + бесплатную/скидочную доставку на 48 часов."),
+      actions: ["Найди товары с 0 продаж за 7д", "Перелистни с новым заголовком/фото", "Запусти 48ч промо на доставку"],
+    },
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "ebay",
+      type: "action",
+      period: "7d",
+      title: "Сократи расходы на доставку",
       text: trimText(
-        "Re-list items with 0 sales last 7d and add stronger keywords + free/discounted shipping for 48h."
+        "Проверь товары с низкой маржой и пересчитай доставку/цену, чтобы не уходить в минус на следующей неделе."
       ),
-      actions: ["Find items with 0 sales 7d", "Re-list with new title/photos", "Run 48h shipping promo"],
+      actions: ["Найди товары с маржой < 5%", "Повышай цену или убери дорогую доставку", "Протестируй наборы/бандлы"],
     },
   ];
 
@@ -916,9 +973,9 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       source: "telegram",
       type: "signal",
       period: "today",
-      title: "Telegram topic to echo",
-      text: trimText(`Mentioned today: "${trimText(telegramSample.text, 160)}". Mirror it in an eBay bundle title.`),
-      actions: ["Lift phrase into listing title", "Cross-link post to store", "Add image that matches topic"],
+      title: "Повтори тему из Telegram",
+      text: trimText(`Тема дня в Telegram${telegramTextPart}. Перенеси формулировку в заголовок и описание лота.`),
+      actions: ["Вставь фразу в заголовок лота", "Добавь ссылку на пост в описании", "Поставь изображение под тему"],
     });
   }
 
@@ -930,9 +987,9 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       source: "youtube",
       type: "signal",
       period: "7d",
-      title: "YouTube interest spike",
-      text: trimText(`Latest video: "${trimText(youtubeSample.title, 140)}". Add related accessory as upsell.`),
-      actions: ["Pin related product under the video", "Add coupon in video description", "Create matching store banner"],
+      title: "Рост интереса на YouTube",
+      text: trimText(`Последнее видео: "${trimText(youtubeSample.title, 140)}". Добавь связанный аксессуар как апселл.`),
+      actions: ["Прикрепи товар под видео", "Добавь купон в описание", "Повесь баннер магазина под тему видео"],
     });
   }
 
@@ -944,11 +1001,11 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
       source: "calendar",
       type: "plan",
       period: "week",
-      title: "Schedule eBay focus block",
+      title: "Запланируй eBay-блок",
       text: trimText(
-        `Block 90 minutes before ${calendarSample.title || "next event"} to ship and reprice listings without overlap.`
+        `Заблокируй 90 минут перед событием "${trimText(calendarSample.title || "событие", 40)}", чтобы отправить заказы и обновить цены.`
       ),
-      actions: ["Add 90m slot to calendar", "Batch shipping + repricing", "Confirm reminders on mobile"],
+      actions: ["Добавь слот 90 минут в календарь", "Сделай рассылку/обновление цен пачкой", "Проверь напоминания на телефоне"],
     });
   }
 
@@ -971,14 +1028,9 @@ function normalizeInsights(
       source: sanitizeSource(item.source),
       type: sanitizeType(item.type),
       period: sanitizePeriod(item.period),
-      title: trimText(item.title || "Insight", 140),
-      text: trimText(item.text || ""),
-      actions: Array.isArray(item.actions)
-        ? item.actions
-            .map((a: any) => (typeof a === "string" ? a.trim() : ""))
-            .filter(Boolean)
-            .slice(0, 5)
-        : [],
+      title: sanitizeTitleField(item.title || "Инсайт"),
+      text: sanitizeTextField(item.text || "", MAX_TEXT_LENGTH),
+      actions: sanitizeActionsField(item.actions),
     };
     normalized.push(card);
     if (normalized.length >= INSIGHTS_MAX) break;
@@ -1057,6 +1109,9 @@ Rules:
 - Produce 6-8 cards total.
 - At least 2 cards must have type="action".
 - Keep every text <= 300 chars.
+- Language: все поля (title, text, actions) на русском, без HTML-сущностей, без markdown, без эмодзи.
+- Если источник на английском — переформулируй по-русски, не оставляй англ. цитаты целиком.
+- Формулируй как чёткий инсайт + конкретное действие.
 - Insights are for Irina's own store (not channel author analytics).
 - Prioritize eBay (money/margin/action). Use Telegram/YouTube as signals to help eBay. Calendar gives time-planning tips.
 
