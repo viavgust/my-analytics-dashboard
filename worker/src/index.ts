@@ -18,6 +18,7 @@ export interface Env {
   SALES_SHEET_RANGE?: string;
   COMPOSIO_CALENDAR_ACCOUNT_ID?: string;
   COMPOSIO_CALENDAR_ENTITY_ID?: string;
+  DEMO_MODE?: string;
 }
 
 type YoutubeMetrics = {
@@ -60,6 +61,7 @@ const MAX_TEXT_LENGTH = 300;
 
 // Обновление всех источников (YouTube / Sheets / Telegram / Calendar) параллельно с таймаутами
 async function refreshAll(env: Env) {
+  const demoMode = env.DEMO_MODE === "true";
   await Promise.allSettled([
     withTimeout(
       (async () => {
@@ -67,7 +69,10 @@ async function refreshAll(env: Env) {
         if (ytMetrics) {
           await upsertYoutubeSnapshot(env, ytMetrics);
         } else {
-          await refreshYoutubeDemo(env);
+          console.warn("YouTube refresh skipped (Composio failed). Keeping last known metrics. DEMO_MODE=", demoMode);
+          if (demoMode) {
+            await refreshYoutubeDemo(env);
+          }
         }
       })(),
       10000,
@@ -388,66 +393,66 @@ function buildDemoDashboardPayload() {
   return {
     updatedAt: new Date().toISOString(),
     telegram: {
-      channel: "my_channel",
+      channel: "greekpod101",
       posts: [
         {
           messageId: "451",
-          text: "Новый ролик! Ссылка в описании канала 🤍",
+          text: "5 must-know Greek words на этой неделе — проверь список",
           publishedAt: "2025-03-15T07:10:00Z",
         },
         {
           messageId: "448",
-          text: "Еженедельный дайджест: лучшие моменты за неделю ✨",
+          text: "Советы по греческому произношению — разбор ошибок",
           publishedAt: "2025-03-14T12:05:00Z",
         },
         {
           messageId: "443",
-          text: "Немного закулисья со вчерашней съёмки 🎬",
+          text: "Вопросы подписчиков про греческие артикли — с примерами",
           publishedAt: "2025-03-12T18:45:00Z",
         },
       ],
     },
     youtube: {
       metrics: {
-        viewsToday: 1234,
-        views7d: 8567,
-        views30d: 32450,
-        allTimeViews: 1200000,
+        viewsToday: 120,
+        views7d: 860,
+        views30d: 3200,
+        allTimeViews: 42000,
         newVideos30d: 4,
-        subscribers: 182000,
+        subscribers: 12000,
       },
       chart: {
         granularity: "month",
       points: [
-          { label: "Oct", views: 12000 },
-          { label: "Nov", views: 18000 },
-          { label: "Dec", views: 15000 },
-          { label: "Jan", views: 22000 },
-          { label: "Feb", views: 28000 },
-          { label: "Mar", views: 32450 },
+          { label: "Oct", views: 1200 },
+          { label: "Nov", views: 1800 },
+          { label: "Dec", views: 1500 },
+          { label: "Jan", views: 2200 },
+          { label: "Feb", views: 2800 },
+          { label: "Mar", views: 3240 },
         ],
       },
       latestVideos: [
         {
-          title: "«Битва экстрасенсов» породила монстров: как разводят астрологи, тарологи и целители? | Разоблачение",
-          url: "https://www.youtube.com/watch?v=XN9Wi7DogfE",
+          title: "5 Must-Know Greek Words: Quality and Distance",
+          url: "https://www.youtube.com/watch?v=abc123greek",
           publishedAt: "2025-12-18T12:23:41+00:00",
-          thumbnailUrl: "https://i1.ytimg.com/vi/XN9Wi7DogfE/hqdefault.jpg",
-          videoId: "XN9Wi7DogfE",
+          thumbnailUrl: "https://i1.ytimg.com/vi/abc123greek/hqdefault.jpg",
+          videoId: "abc123greek",
         },
         {
-          title: "Атаки на школы Петербурга и Подмосковья. Будет хуже? | Ультраправые подростки, рост преступности",
-          url: "https://www.youtube.com/watch?v=ta5KSNnk0Gs",
+          title: "How is Your Greek? Talking about Your Greek Language Skills",
+          url: "https://www.youtube.com/watch?v=def456greek",
           publishedAt: "2025-12-16T16:52:50+00:00",
-          thumbnailUrl: "https://i1.ytimg.com/vi/ta5KSNnk0Gs/hqdefault.jpg",
-          videoId: "ta5KSNnk0Gs",
+          thumbnailUrl: "https://i1.ytimg.com/vi/def456greek/hqdefault.jpg",
+          videoId: "def456greek",
         },
         {
-          title: "Чё Происходит #303 | Лукашенко отпустил заложников, любимое ***-видео россиян, срок для судей МУС",
-          url: "https://www.youtube.com/watch?v=BksOgy_vZo4",
+          title: "Learn Greek Anywhere, Anytime on Your Mobile",
+          url: "https://www.youtube.com/watch?v=ghi789greek",
           publishedAt: "2025-12-14T13:53:26+00:00",
-          thumbnailUrl: "https://i3.ytimg.com/vi/BksOgy_vZo4/hqdefault.jpg",
-          videoId: "BksOgy_vZo4",
+          thumbnailUrl: "https://i3.ytimg.com/vi/ghi789greek/hqdefault.jpg",
+          videoId: "ghi789greek",
         },
       ],
     },
@@ -1813,6 +1818,7 @@ async function fetchYoutubeMetricsFromComposio(env: Env): Promise<YoutubeMetrics
 // Загрузка метрик YouTube через Composio (заготовка, нужно дополнить реальными вызовами)
 // Демо-обновление YouTube данных
 async function refreshYoutubeDemo(env: Env): Promise<void> {
+  console.log("Running YouTube demo refresh (DEMO_MODE only)");
   await env.DB
     .prepare(
       `INSERT INTO youtube_daily
