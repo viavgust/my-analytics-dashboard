@@ -1159,7 +1159,7 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
 
   const topicsText = `Темы: 1) ${top3[0] || "—"}; 2) ${top3[1] || "—"}; 3) ${top3[2] || "—"}.`;
   const repeatedText = repeatedTopic ? ` Повторяется 3 дня: ${repeatedTopic}.` : "";
-  const conclusion = "Один вывод для тебя: зафиксируй интересные темы и вернись к ним позже.";
+  const conclusion = "Сигнал: отметь, что сейчас обсуждают, и выбери одну тему для размышления.";
 
   const cards: InsightCard[] = [
     {
@@ -1171,7 +1171,10 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
       period: "today",
       title: "Темы дня в Telegram",
       text: trimText(`${topicsText}.${repeatedText} ${conclusion}`),
-      actions: ["Сохранить темы в заметки", "Открыть посты и проверить контекст"],
+      actions: [
+        "Выбери 1 тему и сформулируй 1 вопрос/гипотезу",
+        "Сформируй 3 ключевые фразы/угла подачи по теме",
+      ],
     },
   ];
 
@@ -1181,11 +1184,9 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
 function buildYoutubeCard(videos: { title: string; url: string; publishedAt: string }[], runDate: string): InsightCard[] {
   if (!videos || videos.length === 0) return [];
   const nowIso = new Date().toISOString();
-  const titles = videos.slice(0, 3).map((v) => trimText(v.title, 60));
-  const priority = titles
-    .map((t, idx) => `${idx + 1}) ${t}`)
-    .join("; ");
-  const text = trimText(`Что нового: ${titles.slice(0, 3).join("; ")}. Приоритет просмотра: ${priority}.`);
+  const list = videos.slice(0, 3).map((v, idx) => `${idx + 1}) ${trimText(v.title, 80)}`);
+  const priority = `Приоритет: сначала №2, потом №1, наименее важное №3.`;
+  const text = trimText(`Что нового:\n${list.join("\n")}\n${priority}`);
   return [
     {
       id: crypto.randomUUID(),
@@ -1196,7 +1197,10 @@ function buildYoutubeCard(videos: { title: string; url: string; publishedAt: str
       period: "week",
       title: "Что нового на YouTube",
       text,
-      actions: ["Посмотри 15 минут и выпиши 3 идеи", "Сохрани 1–2 тезиса по приоритетным видео"],
+      actions: [
+        "Выбери №1 или №2 и выпиши 1 идею/приём",
+        "Сформулируй 1 фразу/термин, который стоит запомнить",
+      ],
     },
   ];
 }
