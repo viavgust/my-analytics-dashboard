@@ -14,10 +14,8 @@ import {
   type DashboardCalendarEvent,
 } from "@/lib/dashboard-types"
 
-const WORKER_URL =
-  process.env.NEXT_PUBLIC_WORKER_PUBLIC_URL ||
-  process.env.WORKER_PUBLIC_URL ||
-  "http://localhost:8788"
+const WORKER_URL = process.env.NEXT_PUBLIC_WORKER_PUBLIC_URL ?? null
+const WORKER_ERROR = WORKER_URL ? null : "Worker URL is not set"
 
 const FALLBACK_DASHBOARD: DashboardResponse = {
   updatedAt: "2025-03-15T09:15:00Z",
@@ -79,11 +77,11 @@ const FALLBACK_DASHBOARD: DashboardResponse = {
   calendar: [],
 }
 
-async function getDashboardData(): Promise<DashboardResponse> {
-  if (!WORKER_URL) return FALLBACK_DASHBOARD
+async function getDashboardData(workerUrl: string | null): Promise<DashboardResponse> {
+  if (!workerUrl) return FALLBACK_DASHBOARD
 
   try {
-    const res = await fetch(`${WORKER_URL}/api/dashboard`, { cache: "no-store" })
+    const res = await fetch(`${workerUrl}/api/dashboard`, { cache: "no-store" })
     if (!res.ok) throw new Error(`Failed to fetch dashboard: ${res.status}`)
     const data = (await res.json()) as DashboardResponse
     return data
@@ -94,7 +92,7 @@ async function getDashboardData(): Promise<DashboardResponse> {
 }
 
 export default async function DashboardPage() {
-  const dashboard = await getDashboardData()
+  const dashboard = await getDashboardData(WORKER_URL)
   const telegram: DashboardTelegram = dashboard.telegram ?? FALLBACK_DASHBOARD.telegram
   const youtube: DashboardYouTube = dashboard.youtube ?? FALLBACK_DASHBOARD.youtube
   const sales: DashboardSales = dashboard.sales ?? FALLBACK_DASHBOARD.sales
@@ -103,11 +101,16 @@ export default async function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#1a1814] text-white p-6 md:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
-        <HeroSection updatedAt={dashboard.updatedAt} workerUrl={WORKER_URL} />
+        <HeroSection updatedAt={dashboard.updatedAt} workerUrl={WORKER_URL} workerError={WORKER_ERROR} />
+        {WORKER_ERROR ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            {WORKER_ERROR}
+          </div>
+        ) : null}
         <MetricCards telegram={telegram} youtube={youtube} sales={sales} />
         <ChartsRow sales={sales.chart.points} />
         <StudyCalendarCard events={calendar} />
-        <InsightsWidget workerUrl={WORKER_URL} />
+        <InsightsWidget workerUrl={WORKER_URL ?? undefined} />
       </div>
     </div>
   )

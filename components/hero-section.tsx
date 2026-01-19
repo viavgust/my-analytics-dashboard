@@ -9,6 +9,7 @@ import { useState } from "react"
 type HeroSectionProps = {
   updatedAt?: string
   workerUrl?: string
+  workerError?: string | null
 }
 
 function formatUpdatedAt(updatedAt?: string) {
@@ -25,14 +26,14 @@ function formatUpdatedAt(updatedAt?: string) {
   return `Last update: ${formatted}`
 }
 
-export function HeroSection({ updatedAt, workerUrl }: HeroSectionProps) {
+export function HeroSection({ updatedAt, workerUrl, workerError }: HeroSectionProps) {
   const router = useRouter()
   const [isRefreshing, setIsRefreshing] = useState(false)
 
-  const refreshEndpoint =
-    workerUrl ?? process.env.NEXT_PUBLIC_WORKER_PUBLIC_URL ?? process.env.WORKER_PUBLIC_URL ?? "http://localhost:8787"
+  const refreshEndpoint = workerUrl
 
   const handleRefresh = async () => {
+    if (!refreshEndpoint) return
     setIsRefreshing(true)
     try {
       await fetch(`${refreshEndpoint}/api/refresh`, { method: "POST" })
@@ -54,13 +55,21 @@ export function HeroSection({ updatedAt, workerUrl }: HeroSectionProps) {
         </div>
         <Button
           onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="bg-amber-400 hover:bg-amber-300 text-gray-900 rounded-full px-5 py-2 font-medium text-sm"
+          disabled={isRefreshing || !refreshEndpoint}
+          className="bg-amber-400 hover:bg-amber-300 text-gray-900 rounded-full px-5 py-2 font-medium text-sm disabled:opacity-70"
         >
           <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
           {isRefreshing ? "Refreshing..." : "Refresh data"}
         </Button>
-        <p className="text-gray-500 text-xs">{formatUpdatedAt(updatedAt)}</p>
+        <div className="space-y-1 text-xs text-gray-300">
+          <p className="text-gray-500">{formatUpdatedAt(updatedAt)}</p>
+          <p className="text-gray-400">
+            Data source: <span className="font-medium text-amber-100">Greek</span>
+            {" • Worker: "}
+            <span className={workerError ? "text-red-200" : "text-amber-100"}>{workerUrl ?? "not set"}</span>
+          </p>
+          {workerError ? <p className="text-red-300">{workerError}</p> : null}
+        </div>
       </div>
     </div>
   )
