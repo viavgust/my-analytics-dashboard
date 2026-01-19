@@ -51,6 +51,10 @@ const TELEGRAM_PARSE_LIMIT = 24;
 const INSIGHTS_MIN = 6;
 const INSIGHTS_MAX = 8;
 const INSIGHTS_MIN_ACTION = 2;
+const INSIGHTS_MIN_EBAY = 4;
+const INSIGHTS_MIN_TELEGRAM = 1;
+const INSIGHTS_MAX_TELEGRAM = 2;
+const INSIGHTS_MAX_ACTIONS = 3;
 const MAX_TITLE_LENGTH = 60;
 const MAX_TEXT_LENGTH = 300;
 
@@ -575,7 +579,7 @@ function sanitizeActionsField(actions: any): string[] {
   const cleaned = actions
     .map((a) => sanitizeTextField(typeof a === "string" ? a : "", 120))
     .filter(Boolean);
-  return cleaned.slice(0, 6);
+  return cleaned.slice(0, INSIGHTS_MAX_ACTIONS);
 }
 
 function mapInsightRow(row: any): InsightCard {
@@ -885,7 +889,7 @@ function sanitizeType(value: any): InsightCard["type"] {
 }
 
 function sanitizePeriod(value: any): InsightCard["period"] {
-  const allowed = new Set<InsightCard["period"]>(["7d", "30d", "90d", "180d", "today", "week"]);
+  const allowed = new Set<InsightCard["period"]>(["today", "7d", "week", "30d"]);
   if (allowed.has(value)) return value;
   const lower = typeof value === "string" ? value.toLowerCase() : "";
   if (allowed.has(lower as any)) return lower as InsightCard["period"];
@@ -1012,13 +1016,154 @@ function buildFallbackInsights(runDate: string, summary: SalesSummary, inputs: I
   return base;
 }
 
+function extractKeywords(text: string): string[] {
+  const stop = new Set([
+    "https",
+    "http",
+    "video",
+    "watch",
+    "about",
+    "httpswww",
+    "today",
+    "сегодня",
+    "httpwww",
+    "aipost",
+    "tme",
+  ]);
+  const cleaned = stripMarkdownAndEmojis(text).toLowerCase();
+  return cleaned
+    .split(/[^a-zа-я0-9ё]+/i)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 5 && !stop.has(t));
+}
+
+function buildTelegramCards(posts: { text: string; published_at: string }[], runDate: string): InsightCard[] {
+  if (!posts || posts.length === 0) return [];
+  const nowIso = new Date().toISOString();
+
+  const topThree = posts.slice(0, 3).map((p) => trimText(p.text, 80));
+  const topicsText = topThree.map((t) => (t ? `• ${t}` : "")).filter(Boolean).join(" ");
+
+  const cards: InsightCard[] = [
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "telegram",
+      type: "signal",
+      period: "today",
+      title: "Темы дня в Telegram",
+      text: trimText(topicsText ? `Сегодня обсуждают: ${topicsText}` : "Сегодня обсуждают новые темы."),
+      actions: ["Посмотри, можно ли подать товары под эти темы", "Подготовь 1 пост с ответом на интерес аудитории"],
+    },
+  ];
+
+  // повтор темы 3 дня подряд (если доступно)
+  const byDateTokens = new Map<string, Set<string>>();
+  for (const p of posts.slice(0, 40)) {
+    const date = (p.published_at || "").slice(0, 10);
+    if (!date) continue;
+    const tokens = new Set(extractKeywords(p.text || ""));
+    if (!tokens.size) continue;
+    if (!byDateTokens.has(date)) byDateTokens.set(date, new Set<string>());
+    const set = byDateTokens.get(date)!;
+    for (const t of tokens) set.add(t);
+  }
+
+  const tokenDates = new Map<string, Set<string>>();
+  for (const [date, tokens] of byDateTokens.entries()) {
+    for (const t of tokens) {
+      if (!tokenDates.has(t)) tokenDates.set(t, new Set<string>());
+      tokenDates.get(t)!.add(date);
+    }
+  }
+
+  let repeatedTopic: string | null = null;
+  for (const [token, dates] of tokenDates.entries()) {
+    if (dates.size >= 3) {
+      repeatedTopic = token;
+      break;
+    }
+  }
+
+  if (repeatedTopic) {
+    cards.push({
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "telegram",
+      type: "signal",
+      period: "week",
+      title: "Тема держится 3 дня",
+      text: trimText(`Повторяется тема: "${repeatedTopic}". Проверь, как её использовать в товарах/контенте.`),
+      actions: ["Добавь связку товара/поста под эту тему", "Протестируй ключи и фото под тему"],
+    });
+  }
+
+  return cards.slice(0, INSIGHTS_MAX_TELEGRAM);
+}
+
+function buildYoutubeCard(videos: { title: string; url: string; publishedAt: string }[], runDate: string): InsightCard[] {
+  if (!videos || videos.length === 0) return [];
+  const nowIso = new Date().toISOString();
+  const titles = videos.slice(0, 3).map((v) => trimText(v.title, 70));
+  const watchTitle = titles[0] || "новое видео";
+  const text = trimText(`Последние видео: ${titles.join("; ")}. Посмотри "${watchTitle}" и возьми идеи для описаний/фото.`);
+  return [
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "youtube",
+      type: "signal",
+      period: "week",
+      title: "Что посмотреть на YouTube",
+      text,
+      actions: ["Посмотри видео и выпиши 3 идеи", "Протестируй ключи и образы из этого видео"],
+    },
+  ];
+}
+
+function buildCalendarCard(events: { title: string; start: string; end: string | null }[], runDate: string): InsightCard[] {
+  if (!events || events.length === 0) return [];
+  const nowIso = new Date().toISOString();
+  const first = events[0];
+  const second = events[1];
+  let text = "";
+  let actions: string[] = ["Заложи слот под eBay", "Держи буфер 15–30 минут между встречами"];
+
+  if (events.length >= 3) {
+    text = trimText(`Много дел в ближайшие дни (${events.length} событий). Запланируй 60 минут на eBay, чтобы не упустить продажи.`);
+  } else if (first && second) {
+    text = trimText(
+      `Два события подряд: "${trimText(first.title, 40)}" и "${trimText(second.title, 40)}". Оставь 30 минут между ними под eBay.`
+    );
+  } else {
+    text = trimText(`Добавь час на eBay перед событием "${trimText(first.title, 50)}" на этой неделе.`);
+  }
+
+  return [
+    {
+      id: crypto.randomUUID(),
+      createdAt: nowIso,
+      runDate,
+      source: "calendar",
+      type: "plan",
+      period: "week",
+      title: "Спланируй время под eBay",
+      text,
+      actions,
+    },
+  ];
+}
+
 function normalizeInsights(
   raw: any[],
   runDate: string,
   context: { summary: SalesSummary; inputs: InsightInputBundle }
 ): InsightCard[] {
   const nowIso = new Date().toISOString();
-  const normalized: InsightCard[] = [];
+  const fromAi: InsightCard[] = [];
 
   for (const item of Array.isArray(raw) ? raw : []) {
     const card: InsightCard = {
@@ -1032,46 +1177,72 @@ function normalizeInsights(
       text: sanitizeTextField(item.text || "", MAX_TEXT_LENGTH),
       actions: sanitizeActionsField(item.actions),
     };
-    normalized.push(card);
-    if (normalized.length >= INSIGHTS_MAX) break;
+    fromAi.push(card);
   }
 
   const fallbackPool = buildFallbackInsights(runDate, context.summary, context.inputs);
+  const ebayFallback = fallbackPool.filter((c) => c.source === "ebay");
+  const telegramFallback = buildTelegramCards(context.inputs.telegram, runDate);
+  const youtubeFallback = buildYoutubeCard(context.inputs.youtubeVideos, runDate);
+  const calendarFallback = buildCalendarCard(context.inputs.calendar, runDate);
 
-  let ensureAction = normalized.filter((c) => c.type === "action").length;
-  let fallbackIdx = 0;
+  const result: InsightCard[] = [];
+  const usedTitles = new Set<string>();
+  const pushUnique = (card: InsightCard) => {
+    if (!card.title) return;
+    if (usedTitles.has(card.title)) return;
+    usedTitles.add(card.title);
+    result.push(card);
+  };
 
-  while (normalized.length < INSIGHTS_MIN && fallbackPool.length > 0) {
-    const baseCard = fallbackPool[fallbackIdx % fallbackPool.length];
-    normalized.push({
-      ...baseCard,
-      id: crypto.randomUUID(),
-      runDate,
-      createdAt: nowIso,
-    });
-    fallbackIdx += 1;
-  }
-
-  ensureAction = normalized.filter((c) => c.type === "action").length;
-
-  if (ensureAction < INSIGHTS_MIN_ACTION) {
-    let needed = INSIGHTS_MIN_ACTION - ensureAction;
-    for (const card of fallbackPool) {
-      if (needed <= 0) break;
-      if (card.type === "action" && !normalized.find((c) => c.title === card.title)) {
-        normalized.push(card);
-        needed -= 1;
-        ensureAction += 1;
-      }
+  const addFromPool = (pool: InsightCard[], limit: number, predicate?: (c: InsightCard) => boolean) => {
+    for (const c of pool) {
+      if (result.length >= INSIGHTS_MAX || limit <= 0) break;
+      if (predicate && !predicate(c)) continue;
+      pushUnique({ ...c, id: crypto.randomUUID(), createdAt: nowIso, runDate });
+      limit -= 1;
     }
+  };
+
+  // eBay first
+  const ebayAi = fromAi.filter((c) => c.source === "ebay");
+  addFromPool(ebayAi, INSIGHTS_MAX);
+  if (result.filter((c) => c.source === "ebay").length < INSIGHTS_MIN_EBAY) {
+    addFromPool(ebayFallback, INSIGHTS_MIN_EBAY - result.filter((c) => c.source === "ebay").length);
   }
 
-  const uniqueByTitle = new Map<string, InsightCard>();
-  for (const card of normalized) {
-    if (!uniqueByTitle.has(card.title)) uniqueByTitle.set(card.title, card);
+  // ensure action count
+  const actionsNow = result.filter((c) => c.type === "action").length;
+  if (actionsNow < INSIGHTS_MIN_ACTION) {
+    addFromPool(
+      [...ebayAi, ...ebayFallback],
+      INSIGHTS_MIN_ACTION - actionsNow,
+      (c) => c.type === "action"
+    );
   }
 
-  return Array.from(uniqueByTitle.values()).slice(0, INSIGHTS_MAX);
+  // Telegram 1-2
+  const telegramAi = fromAi.filter((c) => c.source === "telegram");
+  const telePool = [...telegramAi, ...telegramFallback];
+  const teleTarget = Math.min(INSIGHTS_MAX_TELEGRAM, telePool.length);
+  addFromPool(telePool, teleTarget);
+
+  // YouTube 1
+  const youtubeAi = fromAi.filter((c) => c.source === "youtube");
+  if (youtubeAi.length > 0) addFromPool(youtubeAi, 1);
+  else addFromPool(youtubeFallback, 1);
+
+  // Calendar 0-1
+  const calendarAi = fromAi.filter((c) => c.source === "calendar");
+  if (calendarAi.length > 0) addFromPool(calendarAi, 1);
+  else addFromPool(calendarFallback, 1);
+
+  // Fill up to min/max with eBay fallbacks
+  if (result.length < INSIGHTS_MIN) {
+    addFromPool([...ebayFallback, ...ebayAi], INSIGHTS_MAX);
+  }
+
+  return result.slice(0, INSIGHTS_MAX);
 }
 
 function buildInsightsPrompt(inputs: InsightInputBundle, summary: SalesSummary): string {
@@ -1098,22 +1269,23 @@ Schema:
   {
     "source": "ebay" | "telegram" | "youtube" | "calendar",
     "type": "money" | "margin" | "action" | "signal" | "plan",
-    "period": "7d" | "30d" | "90d" | "180d" | "today" | "week",
-    "title": "short title",
-    "text": "<=300 chars, 1-2 sentences, clear and specific",
-    "actions": ["step 1", "step 2"]
+    "period": "today" | "7d" | "week" | "30d",
+    "title": "до 60 символов",
+    "text": "до 300 символов",
+    "actions": ["до 3 шагов"]  // всегда массив, даже если пустой
   }
 ]
 
 Rules:
-- Produce 6-8 cards total.
-- At least 2 cards must have type="action".
-- Keep every text <= 300 chars.
-- Language: все поля (title, text, actions) на русском, без HTML-сущностей, без markdown, без эмодзи.
-- Если источник на английском — переформулируй по-русски, не оставляй англ. цитаты целиком.
-- Формулируй как чёткий инсайт + конкретное действие.
-- Insights are for Irina's own store (not channel author analytics).
-- Prioritize eBay (money/margin/action). Use Telegram/YouTube as signals to help eBay. Calendar gives time-planning tips.
+- 6-8 карточек.
+- Минимум 4 карточки source="ebay". Минимум 2 карточки type="action".
+- Язык: русский. Без HTML-сущностей, без markdown, без эмодзи.
+- Не придумывай item_id/SKU/title, если нет в данных. Используй только агрегаты (дни, недели, суммы).
+- Формулируй как инсайт + конкретное действие (коротко).
+- Telegram: 1-2 карточки как внешний сигнал (темы из постов, повтор темы 3 дня, привязка к eBay).
+- YouTube: 1 карточка по последним 3 видео (что посмотреть и почему полезно Ирине).
+- Calendar: 0-1 карточка, только если есть события (свободные слоты/перегруз).
+- Если данных мало по источнику — не выдумывай, лучше пропусти.
 
 Data (JSON):
 ${JSON.stringify(promptPayload, null, 2)}
