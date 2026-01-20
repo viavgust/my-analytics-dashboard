@@ -17,8 +17,8 @@ import { cn } from "@/lib/utils"
 type InsightCard = {
   id: string
   source: "ebay" | "telegram" | "youtube" | "calendar"
-  type: "money" | "margin" | "action" | "signal" | "plan"
-  period: "7d" | "30d" | "90d" | "180d" | "today" | "week"
+  type: "money" | "margin" | "action" | "signal" | "plan" | "recommendation"
+  period: "7d" | "30d" | "90d" | "180d" | "today" | "week" | "3d"
   title: string
   text: string
   actions?: string[]
@@ -44,6 +44,7 @@ const typeLabels: Record<InsightCard["type"], string> = {
   margin: "Маржа",
   action: "Действие",
   signal: "Рекомендация",
+  recommendation: "Рекомендация",
   plan: "План",
 }
 
@@ -54,6 +55,7 @@ const periodLabels: Record<InsightCard["period"], string> = {
   "180d": "180 дней",
   today: "Сегодня",
   week: "Неделя",
+  "3d": "3 дня",
 }
 
 export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
@@ -196,7 +198,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
                     </div>
                   </div>
                   <p className="mt-2 text-sm font-semibold text-white">{card.title}</p>
-                  <p className="mt-1 text-sm leading-relaxed text-amber-50/80">{card.text}</p>
+                  <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-amber-50/80">{card.text}</p>
                   {card.actions && card.actions.length > 0 && (
                     <ul className="mt-2 space-y-1 text-xs text-amber-50/80">
                       {card.actions.map((action, idx) => (
