@@ -99,9 +99,9 @@ function InsightCardView({
         <div className="min-w-0">
           <div className="text-sm font-semibold text-white">{title}</div>
           {badges.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/70">
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/80">
               {badges.map((b, i) => (
-                <span key={i} className="rounded-full bg-white/5 px-2 py-0.5">
+                <span key={i} className="rounded-full px-2 py-0.5 font-semibold">
                   {b}
                 </span>
               ))}
@@ -113,9 +113,12 @@ function InsightCardView({
       {renderInsightText(text)}
 
       {actions && actions.length > 0 && (
-        <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-amber-50/85">
+        <ul className="mt-3 space-y-1 text-sm text-amber-50/85">
           {actions.map((a, i) => (
-            <li key={i}>{a}</li>
+            <li key={i} className="flex items-start gap-2">
+              <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-300" />
+              <span>{a}</span>
+            </li>
           ))}
         </ul>
       )}
@@ -250,15 +253,21 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
             {insights.map((card) => {
               const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
               const metaBadges = [
-                sourceMeta.label,
-                typeLabels[card.type],
-                periodLabels[card.period],
-              ].filter(Boolean)
+                <span key="source" className={cn("rounded-full px-2 py-0.5", sourceMeta.className)}>
+                  {sourceMeta.label}
+                </span>,
+                <span key="type" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
+                  {typeLabels[card.type]}
+                </span>,
+                <span key="period" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
+                  {periodLabels[card.period]}
+                </span>,
+              ]
               return (
                 <InsightCardView
                   key={card.id}
                   title={card.title}
-                  badges={metaBadges}
+                  badges={metaBadges as any}
                   text={card.text}
                   actions={card.actions}
                 />
