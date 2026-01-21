@@ -58,6 +58,72 @@ const periodLabels: Record<InsightCard["period"], string> = {
   "3d": "3 дня",
 }
 
+function renderInsightText(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+
+  const bulletLike = lines.filter((l) => /^[-•]/.test(l))
+  if (bulletLike.length >= 2) {
+    return (
+      <ul className="mt-2 list-inside list-disc space-y-1 text-sm leading-relaxed text-white/75">
+        {bulletLike.map((l, i) => (
+          <li key={i}>{l.replace(/^[-•]\s*/, "")}</li>
+        ))}
+      </ul>
+    )
+  }
+
+  return (
+    <div className="mt-2 whitespace-pre-line text-sm leading-relaxed text-white/75">
+      {text}
+    </div>
+  )
+}
+
+function InsightCardView({
+  title,
+  metaLeft,
+  metaRight,
+  text,
+  actions,
+}: {
+  title: string
+  metaLeft?: string
+  metaRight?: string
+  text: string
+  actions?: string[]
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white">{title}</div>
+          {(metaLeft || metaRight) && (
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/55">
+              {metaLeft && <span className="rounded-full bg-white/5 px-2 py-0.5">{metaLeft}</span>}
+              {metaRight && <span className="rounded-full bg-white/5 px-2 py-0.5">{metaRight}</span>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {renderInsightText(text)}
+
+      {actions && actions.length > 0 && (
+        <ul className="mt-3 list-inside list-disc space-y-1 text-sm text-amber-50/85">
+          {actions.map((a, i) => (
+            <li key={i}>{a}</li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-3 max-h-56 overflow-auto pr-1" />
+    </div>
+  )
+}
+
 export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -182,34 +248,17 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
           <div className="mt-2 space-y-3">
             {insights.map((card) => {
               const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
+              const metaLeft = `${sourceMeta.label} · ${typeLabels[card.type]}`
+              const metaRight = periodLabels[card.period]
               return (
-                <div
+                <InsightCardView
                   key={card.id}
-                  className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-sm shadow-black/20"
-                >
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className={cn("rounded-full px-2 py-0.5 font-semibold", sourceMeta.className)}>
-                        {sourceMeta.label}
-                      </span>
-                      <span className="text-amber-100/80">{typeLabels[card.type]}</span>
-                      <span className="text-amber-100/60">·</span>
-                      <span className="text-amber-100/60">{periodLabels[card.period]}</span>
-                    </div>
-                  </div>
-                  <p className="mt-2 text-sm font-semibold text-white">{card.title}</p>
-                  <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-amber-50/80">{card.text}</p>
-                  {card.actions && card.actions.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-xs text-amber-50/80">
-                      {card.actions.map((action, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-amber-300" />
-                          <span>{action}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
+                  title={card.title}
+                  metaLeft={metaLeft}
+                  metaRight={metaRight}
+                  text={card.text}
+                  actions={card.actions}
+                />
               )
             })}
           </div>
