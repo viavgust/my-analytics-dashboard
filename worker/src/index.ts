@@ -588,7 +588,7 @@ function sanitizeTextField(value: any, maxLen = MAX_TEXT_LENGTH): string {
   return `${cleaned.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
-function sanitizeTelegramText(value: any, maxLen = MAX_TEXT_LENGTH): string {
+function sanitizeMultilineText(value: any, maxLen = MAX_TEXT_LENGTH): string {
   const text = typeof value === "string" ? value.replace(/\r\n?/g, "\n") : "";
   if (!text) return "";
   const lines = text
@@ -625,7 +625,10 @@ function mapInsightRow(row: any): InsightCard {
     type: row.type ?? "action",
     period: row.period ?? "7d",
     title: sanitizeTitleField(row.title ?? "Insight"),
-    text: source === "telegram" ? sanitizeTelegramText(row.text ?? "", MAX_TEXT_LENGTH) : sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
+    text:
+      source === "telegram" || source === "youtube" || source === "calendar"
+        ? sanitizeMultilineText(row.text ?? "", MAX_TEXT_LENGTH)
+        : sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
     actions: sanitizeActionsField(Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json)),
     inputDigest: row.input_digest ?? row.inputDigest ?? null,
   };
@@ -1201,14 +1204,14 @@ function buildYoutubeCard(videos: { title: string; url: string; publishedAt: str
   const nowIso = new Date().toISOString();
   const list = videos.slice(0, 3).map((v, idx) => `${idx + 1}) ${trimText(v.title, 80)}`);
   const priority = `Приоритет: сначала №2, потом №1, наименее важное №3.`;
-  const text = trimText(`Что нового:\n${list.join("\n")}\n${priority}`);
+  const text = `Что нового:\n${list.join("\n")}\n${priority}`;
   return [
     {
       id: crypto.randomUUID(),
       createdAt: nowIso,
       runDate,
       source: "youtube",
-      type: "signal",
+      type: "recommendation",
       period: "week",
       title: "Что нового на YouTube",
       text,
@@ -1229,12 +1232,12 @@ function buildCalendarCard(events: { title: string; start: string; end: string |
       ? start.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "2-digit" })
       : "дата";
     const time = start ? start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—";
-    return `${day} ${time} — ${trimText(ev.title || "Событие", 40)}`;
+    return `• ${day} ${time} — ${trimText(ev.title || "Событие", 40)}`;
   });
 
   const text =
     items.length > 0
-      ? trimText(`Ближайшие события: ${items.join("; ")}`)
+      ? `Ближайшие события:\n${items.join("\n")}`
       : "На ближайшие 3 дня событий нет — можно спокойно планировать.";
   const actions: string[] = ["Поставить напоминание за 30 минут", "Добавить заметку к занятию (что подготовить)"];
 

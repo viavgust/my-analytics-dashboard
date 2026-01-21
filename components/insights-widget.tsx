@@ -84,14 +84,12 @@ function renderInsightText(text: string) {
 
 function InsightCardView({
   title,
-  metaLeft,
-  metaRight,
+  badges,
   text,
   actions,
 }: {
   title: string
-  metaLeft?: string
-  metaRight?: string
+  badges: string[]
   text: string
   actions?: string[]
 }) {
@@ -100,10 +98,13 @@ function InsightCardView({
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-white">{title}</div>
-          {(metaLeft || metaRight) && (
-            <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/55">
-              {metaLeft && <span className="rounded-full bg-white/5 px-2 py-0.5">{metaLeft}</span>}
-              {metaRight && <span className="rounded-full bg-white/5 px-2 py-0.5">{metaRight}</span>}
+          {badges.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/70">
+              {badges.map((b, i) => (
+                <span key={i} className="rounded-full bg-white/5 px-2 py-0.5">
+                  {b}
+                </span>
+              ))}
             </div>
           )}
         </div>
@@ -248,14 +249,16 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
           <div className="mt-2 space-y-3">
             {insights.map((card) => {
               const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
-              const metaLeft = `${sourceMeta.label} · ${typeLabels[card.type]}`
-              const metaRight = periodLabels[card.period]
+              const metaBadges = [
+                sourceMeta.label,
+                typeLabels[card.type],
+                periodLabels[card.period],
+              ].filter(Boolean)
               return (
                 <InsightCardView
                   key={card.id}
                   title={card.title}
-                  metaLeft={metaLeft}
-                  metaRight={metaRight}
+                  badges={metaBadges}
                   text={card.text}
                   actions={card.actions}
                 />
