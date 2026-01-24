@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Drawer,
-  DrawerClose,
   DrawerContent,
 } from "@/components/ui/drawer"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -187,7 +186,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
     <Drawer direction="right" open={open} onOpenChange={setOpen}>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen((prev) => !prev)}
         className="group fixed bottom-4 right-4 z-[60] sm:top-4 sm:bottom-auto"
         aria-label="AI Insights"
       >
@@ -224,16 +223,6 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
             >
               {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
             </Button>
-            <DrawerClose asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="text-amber-200 hover:bg-amber-500/10"
-                title="Закрыть"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </DrawerClose>
           </div>
         </div>
 
