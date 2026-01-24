@@ -186,7 +186,10 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
     <Drawer direction="right" open={open} onOpenChange={setOpen} modal={false}>
       <button
         type="button"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          console.log("robot click", open)
+          setOpen((prev) => !prev)
+        }}
         className="group fixed bottom-4 right-4 z-[999] sm:top-4 sm:bottom-auto"
         aria-label="AI Insights"
       >
@@ -196,6 +199,9 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
             alt="AI robot"
             className="h-24 w-auto drop-shadow-[0_10px_20px_rgba(14,165,233,0.35)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:scale-[1.04]"
           />
+          <span className="pointer-events-none absolute -bottom-4 right-0 text-[10px] text-white/60">
+            open: {String(open)}
+          </span>
           <Badge className="absolute -top-2 -right-3 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
             AI
           </Badge>
