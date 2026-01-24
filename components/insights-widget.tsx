@@ -187,7 +187,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="group fixed bottom-4 right-4 z-[120] sm:top-4 sm:bottom-auto"
+        className="group fixed bottom-4 right-4 z-[999] sm:top-4 sm:bottom-auto"
         aria-label="AI Insights"
       >
         <div className="relative">
