@@ -510,8 +510,8 @@ type InsightCard = {
   createdAt: string;
   runDate: string;
   source: "ebay" | "telegram" | "youtube" | "calendar";
-  type: "money" | "margin" | "action" | "signal" | "plan";
-  period: "7d" | "30d" | "90d" | "180d" | "today" | "week";
+  type: "money" | "margin" | "action" | "signal" | "plan" | "recommendation";
+  period: "7d" | "30d" | "90d" | "180d" | "today" | "week" | "3d";
   title: string;
   text: string;
   actions: string[];
@@ -588,6 +588,20 @@ function sanitizeTextField(value: any, maxLen = MAX_TEXT_LENGTH): string {
   return `${cleaned.slice(0, Math.max(0, maxLen - 3))}...`;
 }
 
+function sanitizeMultilineText(value: any, maxLen = MAX_TEXT_LENGTH): string {
+  const text = typeof value === "string" ? value.replace(/\r\n?/g, "\n") : "";
+  if (!text) return "";
+  const lines = text
+    .split("\n")
+    .map((line) => stripMarkdownAndEmojis(line).trim())
+    .filter(Boolean);
+  let joined = lines.join("\n");
+  if (joined.length > maxLen) {
+    joined = `${joined.slice(0, Math.max(0, maxLen - 3))}...`;
+  }
+  return joined;
+}
+
 function sanitizeTitleField(value: any): string {
   const title = sanitizeTextField(value, MAX_TITLE_LENGTH);
   return title || "Инсайт";
@@ -602,15 +616,19 @@ function sanitizeActionsField(actions: any): string[] {
 }
 
 function mapInsightRow(row: any): InsightCard {
+  const source: InsightCard["source"] = row.source ?? "ebay";
   return {
     id: row.id,
     createdAt: row.created_at ?? row.createdAt ?? new Date().toISOString(),
     runDate: row.run_date ?? row.runDate ?? getRunDate(),
-    source: row.source ?? "ebay",
+    source,
     type: row.type ?? "action",
     period: row.period ?? "7d",
     title: sanitizeTitleField(row.title ?? "Insight"),
-    text: sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
+    text:
+      source === "telegram" || source === "youtube" || source === "calendar"
+        ? sanitizeMultilineText(row.text ?? "", MAX_TEXT_LENGTH)
+        : sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
     actions: sanitizeActionsField(Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json)),
     inputDigest: row.input_digest ?? row.inputDigest ?? null,
   };
@@ -900,7 +918,7 @@ function sanitizeSource(value: any): InsightCard["source"] {
 }
 
 function sanitizeType(value: any): InsightCard["type"] {
-  const allowed = new Set<InsightCard["type"]>(["money", "margin", "action", "signal", "plan"]);
+  const allowed = new Set<InsightCard["type"]>(["money", "margin", "action", "signal", "plan", "recommendation"]);
   if (allowed.has(value)) return value;
   const lower = typeof value === "string" ? value.toLowerCase() : "";
   if (allowed.has(lower as any)) return lower as InsightCard["type"];
@@ -1157,9 +1175,9 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
     }
   }
 
-  const topicsText = `Темы: 1) ${top3[0] || "—"}; 2) ${top3[1] || "—"}; 3) ${top3[2] || "—"}.`;
-  const repeatedText = repeatedTopic ? ` Повторяется 3 дня: ${repeatedTopic}.` : "";
-  const conclusion = "Сигнал: отметь, что сейчас обсуждают, и выбери одну тему для размышления.";
+  const topicsText = `Темы:\n1) ${top3[0] || "—"}\n2) ${top3[1] || "—"}\n3) ${top3[2] || "—"}`;
+  const repeatedText = repeatedTopic ? `\nПовторяется 3 дня: ${repeatedTopic}.` : "";
+  const conclusion = "Сигнал: выбери одну тему и подумай, почему она важна.";
 
   const cards: InsightCard[] = [
     {
@@ -1167,10 +1185,10 @@ function buildTelegramCards(posts: { text: string; published_at: string }[], run
       createdAt: nowIso,
       runDate,
       source: "telegram",
-      type: "signal",
+      type: "recommendation",
       period: "today",
       title: "Темы дня в Telegram",
-      text: trimText(`${topicsText}.${repeatedText} ${conclusion}`),
+      text: `${topicsText}${repeatedText}\n${conclusion}`,
       actions: [
         "Выбери 1 тему и сформулируй 1 вопрос/гипотезу",
         "Сформируй 3 ключевые фразы/угла подачи по теме",
@@ -1186,14 +1204,14 @@ function buildYoutubeCard(videos: { title: string; url: string; publishedAt: str
   const nowIso = new Date().toISOString();
   const list = videos.slice(0, 3).map((v, idx) => `${idx + 1}) ${trimText(v.title, 80)}`);
   const priority = `Приоритет: сначала №2, потом №1, наименее важное №3.`;
-  const text = trimText(`Что нового:\n${list.join("\n")}\n${priority}`);
+  const text = `Что нового:\n${list.join("\n")}\n${priority}`;
   return [
     {
       id: crypto.randomUUID(),
       createdAt: nowIso,
       runDate,
       source: "youtube",
-      type: "signal",
+      type: "recommendation",
       period: "week",
       title: "Что нового на YouTube",
       text,
@@ -1214,12 +1232,12 @@ function buildCalendarCard(events: { title: string; start: string; end: string |
       ? start.toLocaleDateString("ru-RU", { weekday: "short", day: "2-digit", month: "2-digit" })
       : "дата";
     const time = start ? start.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : "—";
-    return `${day} ${time} — ${trimText(ev.title || "Событие", 40)}`;
+    return `• ${day} ${time} — ${trimText(ev.title || "Событие", 40)}`;
   });
 
   const text =
     items.length > 0
-      ? trimText(`Ближайшие события: ${items.join("; ")}`)
+      ? `Ближайшие события:\n${items.join("\n")}`
       : "На ближайшие 3 дня событий нет — можно спокойно планировать.";
   const actions: string[] = ["Поставить напоминание за 30 минут", "Добавить заметку к занятию (что подготовить)"];
 
