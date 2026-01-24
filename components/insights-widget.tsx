@@ -58,6 +58,13 @@ const periodLabels: Record<InsightCard["period"], string> = {
   "3d": "3 дня",
 }
 
+const SOURCE_ORDER: Record<InsightCard["source"], number> = {
+  ebay: 0,
+  telegram: 1,
+  youtube: 2,
+  calendar: 3,
+}
+
 function renderInsightText(text: string) {
   const lines = text
     .split(/\r?\n/)
@@ -250,7 +257,14 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
           )}
 
           <div className="mt-2 space-y-3">
-            {insights.map((card) => {
+            {insights
+              .map((card, idx) => ({ ...card, _idx: idx }))
+              .sort(
+                (a, b) =>
+                  (SOURCE_ORDER[a.source] ?? 999) - (SOURCE_ORDER[b.source] ?? 999) ||
+                  a._idx - b._idx
+              )
+              .map((card) => {
               const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
               const metaBadges = [
                 <span key="source" className={cn("rounded-full px-2 py-0.5", sourceMeta.className)}>
