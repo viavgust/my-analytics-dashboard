@@ -183,7 +183,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
   const badgeContent = runDate ? `AI · ${runDate}` : "AI"
 
   return (
-    <Drawer direction="right" open={open} onOpenChange={setOpen}>
+    <Drawer direction="right" open={open} onOpenChange={setOpen} modal={false}>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
