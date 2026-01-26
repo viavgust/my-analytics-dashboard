@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Bot, RefreshCw, X } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -192,7 +192,10 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="group fixed bottom-4 right-4 z-[60] sm:top-4 sm:bottom-auto"
+        className={cn(
+          "group fixed bottom-4 right-4 z-[60] sm:bottom-auto",
+          open ? "sm:top-24" : "sm:top-4"
+        )}
         aria-label="AI Insights"
       >
         <div className="relative">
@@ -232,7 +235,11 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
               variant="ghost"
               size="icon-sm"
               className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
-              onClick={() => fetchInsights("generate")}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void fetchInsights("generate")
+              }}
               disabled={loading}
               title="Запустить генерацию"
               aria-label="Запустить генерацию"
