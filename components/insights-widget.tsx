@@ -29,6 +29,8 @@ type InsightsResponse = {
   insights: InsightCard[]
 }
 
+type HomeworkStatus = "yes" | "no" | null
+
 const sourceStyles: Record<
   InsightCard["source"],
   { label: string; className: string }
@@ -67,6 +69,31 @@ const SOURCE_ORDER: Record<InsightCard["source"], number> = {
   calendar: 4,
 }
 
+function splitSummaryText(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+  let studyLine: string | null = null
+  let homeworkLine: string | null = null
+  if (lines[0]?.startsWith("Учёба:")) {
+    studyLine = lines.shift() ?? null
+  }
+  if (lines[0]?.startsWith("Домашка:")) {
+    homeworkLine = lines.shift() ?? null
+  }
+  return {
+    studyLine,
+    homeworkLine,
+    body: lines.join("\n"),
+  }
+}
+
+function getHomeworkKey(runDate: string | null) {
+  const fallback = new Date().toISOString().slice(0, 10)
+  return `homework_status_${runDate ?? fallback}`
+}
+
 function renderInsightText(text: string) {
   const lines = text
     .split(/\r?\n/)
@@ -97,23 +124,40 @@ function InsightCardView({
   text,
   actions,
   isSummary,
+  homeworkStatus,
+  onHomeworkChange,
 }: {
   title: string
   badges: ReactNode[]
   text: string
   actions?: string[]
   isSummary?: boolean
+  homeworkStatus?: HomeworkStatus
+  onHomeworkChange?: (value: HomeworkStatus) => void
 }) {
+  const summaryParts = isSummary ? splitSummaryText(text) : null
   return (
     <div
       className={cn(
-        "rounded-2xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur",
-        isSummary && "border-amber-300/40 bg-white/10 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
+        "relative rounded-2xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur",
+        isSummary &&
+          "border-amber-300/60 bg-amber-200/15 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
       )}
     >
+      {isSummary && (
+        <span
+          aria-hidden="true"
+          className="absolute left-0 top-0 h-full w-1.5 rounded-l-2xl bg-amber-400/80"
+        />
+      )}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <div
+            className={cn(
+              "flex items-center gap-2 font-semibold text-white",
+              isSummary ? "text-base" : "text-sm"
+            )}
+          >
             {isSummary && (
               <span className="text-amber-300" aria-hidden="true">
                 ⭐
@@ -133,7 +177,45 @@ function InsightCardView({
         </div>
       </div>
 
-      {renderInsightText(text)}
+      {isSummary && summaryParts?.studyLine && (
+        <div className="mt-3 text-sm text-amber-50/90">{summaryParts.studyLine}</div>
+      )}
+      {isSummary && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-amber-50/90">
+          <span>Домашка: готова?</span>
+          <button
+            type="button"
+            onClick={() => onHomeworkChange?.("yes")}
+            aria-pressed={homeworkStatus === "yes"}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-xs font-semibold transition",
+              homeworkStatus === "yes"
+                ? "border-amber-200/70 bg-amber-200/20 text-amber-100"
+                : "border-white/10 bg-white/5 text-amber-50/70 hover:border-amber-200/40"
+            )}
+          >
+            Да
+          </button>
+          <button
+            type="button"
+            onClick={() => onHomeworkChange?.("no")}
+            aria-pressed={homeworkStatus === "no"}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-xs font-semibold transition",
+              homeworkStatus === "no"
+                ? "border-amber-200/70 bg-amber-200/20 text-amber-100"
+                : "border-white/10 bg-white/5 text-amber-50/70 hover:border-amber-200/40"
+            )}
+          >
+            Нет
+          </button>
+        </div>
+      )}
+      {isSummary && summaryParts?.studyLine && (
+        <div className="my-3 h-px w-full bg-white/10" />
+      )}
+
+      {renderInsightText(isSummary ? summaryParts?.body ?? "" : text)}
 
       {actions && actions.length > 0 && (
         <ul className="mt-3 space-y-1 text-sm text-amber-50/85">
@@ -157,8 +239,10 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
   const [error, setError] = useState<string | null>(null)
   const [insights, setInsights] = useState<InsightCard[]>([])
   const [runDate, setRunDate] = useState<string | null>(null)
+  const [homeworkStatus, setHomeworkStatus] = useState<HomeworkStatus>(null)
 
   const baseUrl = useMemo(() => workerUrl?.replace(/\/$/, "") ?? "", [workerUrl])
+  const homeworkKey = useMemo(() => getHomeworkKey(runDate), [runDate])
 
   const fetchInsights = async (mode: "latest" | "generate" = "latest") => {
     setLoading(true)
@@ -196,6 +280,33 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
       void fetchInsights("latest")
     }
   }, [open, insights.length, baseUrl])
+
+  useEffect(() => {
+    if (!open) return
+    try {
+      const stored = localStorage.getItem(homeworkKey)
+      if (stored === "yes" || stored === "no") {
+        setHomeworkStatus(stored)
+      } else {
+        setHomeworkStatus(null)
+      }
+    } catch {
+      setHomeworkStatus(null)
+    }
+  }, [open, homeworkKey])
+
+  const handleHomeworkChange = (value: HomeworkStatus) => {
+    setHomeworkStatus(value)
+    try {
+      if (value) {
+        localStorage.setItem(homeworkKey, value)
+      } else {
+        localStorage.removeItem(homeworkKey)
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
 
   const badgeContent = runDate ? `AI · ${runDate}` : "AI"
 
@@ -311,6 +422,8 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
                   text={card.text}
                   actions={card.actions}
                   isSummary={isSummary}
+                  homeworkStatus={isSummary ? homeworkStatus : undefined}
+                  onHomeworkChange={isSummary ? handleHomeworkChange : undefined}
                 />
               )
             })}

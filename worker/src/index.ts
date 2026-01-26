@@ -1510,7 +1510,31 @@ async function generateInsightsWithGemini(env: Env, inputs: InsightInputBundle, 
   }
 }
 
-function buildSummaryPrompt(cards: InsightCard[]): string {
+type SummaryFacts = {
+  hasSalesData: boolean;
+  metricPhrases: string[];
+  missing: string[];
+};
+
+function buildSummaryFacts(summary: SalesSummary, salesRows: number): SummaryFacts {
+  const hasSalesData = salesRows > 0;
+  const metricPhrases: string[] = [];
+  const missing: string[] = [];
+
+  if (!hasSalesData) {
+    missing.push("нет данных по продажам");
+  } else {
+    metricPhrases.push(`выручка 7д: $${summary.last7Revenue.toFixed(0)}`);
+    metricPhrases.push(`выручка пред. 7д: $${summary.prev7Revenue.toFixed(0)}`);
+    metricPhrases.push(`прибыль 7д: $${summary.last7Profit.toFixed(0)}`);
+    metricPhrases.push(`средний чек: $${summary.avgOrder.toFixed(2)}`);
+    metricPhrases.push(`выручка 30д: $${summary.last30Revenue.toFixed(0)}`);
+  }
+
+  return { hasSalesData, metricPhrases, missing };
+}
+
+function buildSummaryPrompt(cards: InsightCard[], facts: SummaryFacts): string {
   const payload = cards.map((card) => ({
     source: card.source,
     type: card.type,
@@ -1544,11 +1568,24 @@ Rules:
   2) ...
   3) ...
   Риски/что проверить: 1–2 пункта
+- В строке "Итог" используй минимум 2 фразы из metric_phrases ДОСЛОВНО.
+- Если has_sales_data=false, напиши: "Данных недостаточно: ..." используя missing.
 - Формулируй на "ты", без 1-го лица.
 - В "Топ-3 действия" используй глаголы: Сделай/Проверь/Сравни/Обнови.
 - Добавь 1–2 элемента конкретики (период/число), но без воды.
 - actions: ровно 2, короткие, практичные, тоже в стиле "ты".
 - НЕ добавляй строки "Учёба" и "Домашка" — они будут добавлены отдельно.
+
+Facts (JSON):
+${JSON.stringify(
+  {
+    has_sales_data: facts.hasSalesData,
+    metric_phrases: facts.metricPhrases,
+    missing: facts.missing,
+  },
+  null,
+  2
+)}
 
 Cards (JSON):
 ${JSON.stringify(payload, null, 2)}
@@ -1558,10 +1595,11 @@ ${JSON.stringify(payload, null, 2)}
 async function generateSummaryWithGemini(
   env: Env,
   cards: InsightCard[],
-  studyBlock: string
+  studyBlock: string,
+  facts: SummaryFacts
 ): Promise<InsightCard | null> {
   if (!env.GEMINI_API_KEY || cards.length === 0) return null;
-  const prompt = buildSummaryPrompt(cards);
+  const prompt = buildSummaryPrompt(cards, facts);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
 
   try {
@@ -1625,7 +1663,10 @@ async function generateSummaryWithGemini(
       cleanedText.includes("Итог:") &&
       cleanedText.includes("Топ-3 действия") &&
       cleanedText.includes("Риски/что проверить");
-    const fallback = buildFallbackSummary(cards, getRunDate(), studyBlock);
+    const usesMetrics = facts.hasSalesData
+      ? facts.metricPhrases.filter((phrase) => cleanedText.includes(phrase)).length >= 2
+      : /данных недостаточно/i.test(cleanedText);
+    const fallback = buildFallbackSummary(cards, getRunDate(), studyBlock, facts);
     const composedText = hasStructure
       ? sanitizeMultilineText([studyBlock, cleanedText].filter(Boolean).join("\n"), MAX_TEXT_LENGTH)
       : fallback.text;
@@ -1637,7 +1678,7 @@ async function generateSummaryWithGemini(
       type: "recommendation",
       period: "today",
       title: "Сводка",
-      text: composedText,
+      text: hasStructure && usesMetrics ? composedText : fallback.text,
       actions: actions.slice(0, 2),
       inputDigest: null,
     };
@@ -1647,13 +1688,25 @@ async function generateSummaryWithGemini(
   }
 }
 
-function buildFallbackSummary(cards: InsightCard[], runDate: string, studyBlock: string): InsightCard {
+function buildFallbackSummary(
+  cards: InsightCard[],
+  runDate: string,
+  studyBlock: string,
+  facts: SummaryFacts
+): InsightCard {
   const nowIso = new Date().toISOString();
   const titles = cards.map((c) => c.title).filter(Boolean).slice(0, 3);
   while (titles.length < 3) titles.push("Фокус дня");
 
+  const metricsLine =
+    facts.metricPhrases.length >= 2 ? `(${facts.metricPhrases.slice(0, 2).join(", ")})` : "";
+  const missingLine =
+    !facts.hasSalesData && facts.missing.length > 0 ? `Данных недостаточно: ${facts.missing.join(", ")}.` : "";
+
   const body = [
-    "Итог: фокус дня — eBay и свежесть внешних сигналов; календарь держи как план.",
+    missingLine
+      ? `Итог: ${missingLine}`
+      : `Итог: фокус дня — eBay и свежесть внешних сигналов; календарь держи как план. ${metricsLine}`.trim(),
     "Топ-3 действия:",
     "1) Сравни 7д vs пред. 7д и зафиксируй причину.",
     "2) Проверь средний чек и главный источник кассы за 7д.",
@@ -1687,8 +1740,9 @@ async function generateAndStoreInsights(env: Env, trigger: string) {
 
   const insights = normalizeInsights(aiRaw, runDate, { summary, inputs });
   const studyBlock = buildStudyBlock(inputs.calendar);
-  const summaryCard = await generateSummaryWithGemini(env, insights, studyBlock);
-  const merged = [summaryCard ?? buildFallbackSummary(insights, runDate, studyBlock), ...insights];
+  const summaryFacts = buildSummaryFacts(summary, inputs.sales.length);
+  const summaryCard = await generateSummaryWithGemini(env, insights, studyBlock, summaryFacts);
+  const merged = [summaryCard ?? buildFallbackSummary(insights, runDate, studyBlock, summaryFacts), ...insights];
   const digest = await buildInputDigest({
     runDate,
     trigger,
