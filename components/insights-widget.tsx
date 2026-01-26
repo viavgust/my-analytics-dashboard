@@ -190,7 +190,7 @@ function InsightCardView({
             className={cn(
               "rounded-full border px-2.5 py-1 text-xs font-semibold transition",
               homeworkStatus === "yes"
-                ? "border-amber-200/70 bg-amber-200/20 text-amber-100"
+                ? "border-amber-200/90 bg-amber-300/40 text-amber-50 font-bold shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
                 : "border-white/10 bg-white/5 text-amber-50/70 hover:border-amber-200/40"
             )}
           >
@@ -203,7 +203,7 @@ function InsightCardView({
             className={cn(
               "rounded-full border px-2.5 py-1 text-xs font-semibold transition",
               homeworkStatus === "no"
-                ? "border-amber-200/70 bg-amber-200/20 text-amber-100"
+                ? "border-amber-200/90 bg-amber-300/40 text-amber-50 font-bold shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
                 : "border-white/10 bg-white/5 text-amber-50/70 hover:border-amber-200/40"
             )}
           >

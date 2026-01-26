@@ -63,6 +63,7 @@ const INSIGHTS_MAX_ACTIONS = 3;
 const YT_CACHE_TTL_DAYS = 7;
 const MAX_TITLE_LENGTH = 60;
 const MAX_TEXT_LENGTH = 300;
+const MAX_SUMMARY_TEXT_LENGTH = 600;
 const SUMMARY_TIMEZONE = "America/New_York";
 const SUMMARY_LOOKAHEAD_DAYS = 14;
 const LESSON_TITLE_RE = /(урок|занятие|курс|нейросет|homework|lesson)/i;
@@ -697,9 +698,11 @@ function mapInsightRow(row: any): InsightCard {
     period: row.period ?? "7d",
     title: sanitizeTitleField(row.title ?? "Insight"),
     text:
-      source === "summary" || source === "telegram" || source === "youtube" || source === "calendar"
-        ? sanitizeMultilineText(row.text ?? "", MAX_TEXT_LENGTH)
-        : sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
+      source === "summary"
+        ? sanitizeMultilineText(row.text ?? "", MAX_SUMMARY_TEXT_LENGTH)
+        : source === "telegram" || source === "youtube" || source === "calendar"
+          ? sanitizeMultilineText(row.text ?? "", MAX_TEXT_LENGTH)
+          : sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
     actions: sanitizeActionsField(Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json)),
     inputDigest: row.input_digest ?? row.inputDigest ?? null,
   };
@@ -1658,7 +1661,7 @@ async function generateSummaryWithGemini(
       ];
     }
 
-    const cleanedText = sanitizeMultilineText(parsed?.text ?? "", MAX_TEXT_LENGTH);
+    const cleanedText = sanitizeMultilineText(parsed?.text ?? "", MAX_SUMMARY_TEXT_LENGTH);
     const hasStructure =
       cleanedText.includes("Итог:") &&
       cleanedText.includes("Топ-3 действия") &&
@@ -1668,7 +1671,7 @@ async function generateSummaryWithGemini(
       : /данных недостаточно/i.test(cleanedText);
     const fallback = buildFallbackSummary(cards, getRunDate(), studyBlock, facts);
     const composedText = hasStructure
-      ? sanitizeMultilineText([studyBlock, cleanedText].filter(Boolean).join("\n"), MAX_TEXT_LENGTH)
+      ? sanitizeMultilineText([studyBlock, cleanedText].filter(Boolean).join("\n"), MAX_SUMMARY_TEXT_LENGTH)
       : fallback.text;
     return {
       id: crypto.randomUUID(),
@@ -1713,7 +1716,10 @@ function buildFallbackSummary(
     "3) Обнови сбор, если обновление старше 24 ч.",
     "Риски/что проверить: несвежие данные, сбои источников.",
   ].join("\n");
-  const text = sanitizeMultilineText([studyBlock, body].filter(Boolean).join("\n"), MAX_TEXT_LENGTH);
+  const text = sanitizeMultilineText(
+    [studyBlock, body].filter(Boolean).join("\n"),
+    MAX_SUMMARY_TEXT_LENGTH
+  );
 
   return {
     id: crypto.randomUUID(),
