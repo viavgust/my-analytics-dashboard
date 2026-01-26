@@ -1468,12 +1468,15 @@ Rules:
 - title <= 60, text <= 300.
 - text (строго по форме):
   Итог: 1–2 предложения
-  Топ-3 приоритета:
+  Топ-3 действия:
   1) ...
   2) ...
   3) ...
   Риски/что проверить: 1–2 пункта
-- actions: ровно 2, короткие, неочевидные, без "сохрани/открой/проверь контекст".
+- Формулируй на "ты", без 1-го лица.
+- В "Топ-3 действия" используй глаголы: Сделай/Проверь/Сравни/Обнови.
+- Добавь 1–2 элемента конкретики (период/число), но без воды.
+- actions: ровно 2, короткие, практичные, тоже в стиле "ты".
 
 Cards (JSON):
 ${JSON.stringify(payload, null, 2)}
@@ -1541,6 +1544,12 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
       ];
     }
 
+    const cleanedText = sanitizeMultilineText(parsed?.text ?? "", MAX_TEXT_LENGTH);
+    const hasStructure =
+      cleanedText.includes("Итог:") &&
+      cleanedText.includes("Топ-3 действия") &&
+      cleanedText.includes("Риски/что проверить");
+    const fallback = buildFallbackSummary(cards, getRunDate());
     return {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -1549,7 +1558,7 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
       type: "recommendation",
       period: "today",
       title: "Сводка",
-      text: sanitizeMultilineText(parsed?.text ?? "", MAX_TEXT_LENGTH),
+      text: hasStructure ? cleanedText : fallback.text,
       actions: actions.slice(0, 2),
       inputDigest: null,
     };
@@ -1566,12 +1575,12 @@ function buildFallbackSummary(cards: InsightCard[], runDate: string): InsightCar
 
   const text = sanitizeMultilineText(
     [
-      "Итог: сегодня главный фокус — eBay и внешние сигналы, плюс план по календарю.",
-      "Топ-3 приоритета:",
-      `1) ${titles[0]}`,
-      `2) ${titles[1]}`,
-      `3) ${titles[2]}`,
-      "Риски/что проверить: просадки по динамике и свежесть данных.",
+      "Итог: главный фокус дня — eBay и свежесть внешних сигналов; календарь держи как план.",
+      "Топ-3 действия:",
+      `1) Сравни 7д vs предыдущие 7д и отметь главную причину изменения.`,
+      `2) Проверь средний чек и что даёт основную кассу за 7 дней.`,
+      `3) Обнови/перезапусти сбор данных, если обновление старше 24 часов.`,
+      "Риски/что проверить: несвежие данные и сбои источников.",
     ].join("\n"),
     MAX_TEXT_LENGTH
   );
