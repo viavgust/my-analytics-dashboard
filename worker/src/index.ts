@@ -1527,8 +1527,13 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
       return null;
     }
 
-    const actions = sanitizeActionsField(parsed?.actions);
-    if (actions.length < 2) return null;
+    let actions = sanitizeActionsField(parsed?.actions);
+    if (actions.length < 2) {
+      actions = [
+        "Выдели 1 главный фокус дня и отложи второстепенное",
+        "Сформулируй критерий успеха на сегодня (1 строка)",
+      ];
+    }
 
     return {
       id: crypto.randomUUID(),
