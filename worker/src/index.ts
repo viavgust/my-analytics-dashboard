@@ -1456,9 +1456,9 @@ function buildSummaryPrompt(cards: InsightCard[]): string {
 Schema:
 {
   "source": "summary",
-  "type": "plan",
+  "type": "recommendation",
   "period": "today",
-  "title": "Сводка по всем советам",
+  "title": "Сводка",
   "text": "многострочный текст",
   "actions": ["ровно 2 коротких действия"]
 }
@@ -1535,9 +1535,9 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
       createdAt: new Date().toISOString(),
       runDate: getRunDate(),
       source: "summary",
-      type: "plan",
+      type: "recommendation",
       period: "today",
-      title: "Сводка по всем советам",
+      title: "Сводка",
       text: sanitizeMultilineText(parsed?.text ?? "", MAX_TEXT_LENGTH),
       actions: actions.slice(0, 2),
       inputDigest: null,
