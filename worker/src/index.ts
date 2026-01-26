@@ -509,7 +509,7 @@ type InsightCard = {
   id: string;
   createdAt: string;
   runDate: string;
-  source: "ebay" | "telegram" | "youtube" | "calendar";
+  source: "summary" | "ebay" | "telegram" | "youtube" | "calendar";
   type: "money" | "margin" | "action" | "signal" | "plan" | "recommendation";
   period: "7d" | "30d" | "90d" | "180d" | "today" | "week" | "3d";
   title: string;
@@ -626,7 +626,7 @@ function mapInsightRow(row: any): InsightCard {
     period: row.period ?? "7d",
     title: sanitizeTitleField(row.title ?? "Insight"),
     text:
-      source === "telegram" || source === "youtube" || source === "calendar"
+      source === "summary" || source === "telegram" || source === "youtube" || source === "calendar"
         ? sanitizeMultilineText(row.text ?? "", MAX_TEXT_LENGTH)
         : sanitizeTextField(row.text ?? "", MAX_TEXT_LENGTH),
     actions: sanitizeActionsField(Array.isArray(row.actions) ? row.actions : parseActions(row.actions_json)),
@@ -910,9 +910,10 @@ function trimText(text: string, max = 300) {
 }
 
 function sanitizeSource(value: any): InsightCard["source"] {
-  const allowed = new Set<InsightCard["source"]>(["ebay", "telegram", "youtube", "calendar"]);
+  const allowed = new Set<InsightCard["source"]>(["summary", "ebay", "telegram", "youtube", "calendar"]);
   if (allowed.has(value)) return value;
   const lower = typeof value === "string" ? value.toLowerCase() : "";
+  if (lower === "ai_summary" || lower === "summary") return "summary";
   if (allowed.has(lower as any)) return lower as InsightCard["source"];
   return "ebay";
 }
@@ -1438,6 +1439,115 @@ async function generateInsightsWithGemini(env: Env, inputs: InsightInputBundle, 
   }
 }
 
+function buildSummaryPrompt(cards: InsightCard[]): string {
+  const payload = cards.map((card) => ({
+    source: card.source,
+    type: card.type,
+    period: card.period,
+    title: card.title,
+    text: card.text,
+    actions: card.actions ?? [],
+  }));
+
+  return `
+Ты делаешь итоговую сводку по уже сгенерированным карточкам.
+Верни STRICT JSON ONLY — один объект, без массива и без дополнительного текста.
+
+Schema:
+{
+  "source": "summary",
+  "type": "plan",
+  "period": "today",
+  "title": "Сводка по всем советам",
+  "text": "многострочный текст",
+  "actions": ["ровно 2 коротких действия"]
+}
+
+Rules:
+- Язык: русский. Без HTML/markdown/эмодзи.
+- title <= 60, text <= 300.
+- text (строго по форме):
+  Итог: 1–2 предложения
+  Топ-3 приоритета:
+  1) ...
+  2) ...
+  3) ...
+  Риски/что проверить: 1–2 пункта
+- actions: ровно 2, короткие, неочевидные, без "сохрани/открой/проверь контекст".
+
+Cards (JSON):
+${JSON.stringify(payload, null, 2)}
+`;
+}
+
+async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promise<InsightCard | null> {
+  if (!env.GEMINI_API_KEY || cards.length === 0) return null;
+  const prompt = buildSummaryPrompt(cards);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }]}],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 400,
+          responseMimeType: "application/json",
+        },
+      }),
+    });
+
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("Gemini summary error", res.status, text.slice(0, 500));
+      return null;
+    }
+
+    let payload: any = null;
+    try {
+      payload = JSON.parse(text);
+    } catch (_) {
+      payload = text;
+    }
+
+    const rawText =
+      payload?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      payload?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      (typeof payload === "string" ? payload : "");
+
+    if (!rawText) return null;
+
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (err) {
+      console.error("Failed to parse Gemini summary JSON", err);
+      return null;
+    }
+
+    const actions = sanitizeActionsField(parsed?.actions);
+    if (actions.length < 2) return null;
+
+    return {
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+      runDate: getRunDate(),
+      source: "summary",
+      type: "plan",
+      period: "today",
+      title: "Сводка по всем советам",
+      text: sanitizeMultilineText(parsed?.text ?? "", MAX_TEXT_LENGTH),
+      actions: actions.slice(0, 2),
+      inputDigest: null,
+    };
+  } catch (err) {
+    console.error("Gemini summary fetch failed", err);
+    return null;
+  }
+}
+
 async function generateAndStoreInsights(env: Env, trigger: string) {
   const runDate = getRunDate();
   const inputs = await collectInsightInputs(env);
@@ -1445,6 +1555,8 @@ async function generateAndStoreInsights(env: Env, trigger: string) {
   const aiRaw = await generateInsightsWithGemini(env, inputs, summary);
 
   const insights = normalizeInsights(aiRaw, runDate, { summary, inputs });
+  const summaryCard = await generateSummaryWithGemini(env, insights);
+  const merged = summaryCard ? [summaryCard, ...insights] : insights;
   const digest = await buildInputDigest({
     runDate,
     trigger,
@@ -1455,12 +1567,12 @@ async function generateAndStoreInsights(env: Env, trigger: string) {
     calendar: inputs.calendar.slice(0, 8),
   });
 
-  await storeInsights(env, runDate, insights, digest);
+  await storeInsights(env, runDate, merged, digest);
 
   return {
     runDate,
     generatedAt: new Date().toISOString(),
-    insights,
+    insights: merged,
   };
 }
 

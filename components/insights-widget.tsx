@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils"
 
 type InsightCard = {
   id: string
-  source: "ebay" | "telegram" | "youtube" | "calendar"
+  source: "summary" | "ebay" | "telegram" | "youtube" | "calendar"
   type: "money" | "margin" | "action" | "signal" | "plan" | "recommendation"
   period: "7d" | "30d" | "90d" | "180d" | "today" | "week" | "3d"
   title: string
@@ -33,6 +33,7 @@ const sourceStyles: Record<
   InsightCard["source"],
   { label: string; className: string }
 > = {
+  summary: { label: "Сводка", className: "bg-cyan-500/15 text-cyan-100 border border-cyan-200/20" },
   ebay: { label: "eBay", className: "bg-amber-500/15 text-amber-200 border border-amber-200/20" },
   telegram: { label: "Telegram", className: "bg-sky-500/15 text-sky-100 border border-sky-200/20" },
   youtube: { label: "YouTube", className: "bg-red-500/15 text-red-100 border border-red-200/20" },
@@ -59,10 +60,11 @@ const periodLabels: Record<InsightCard["period"], string> = {
 }
 
 const SOURCE_ORDER: Record<InsightCard["source"], number> = {
-  ebay: 0,
-  telegram: 1,
-  youtube: 2,
-  calendar: 3,
+  summary: 0,
+  ebay: 1,
+  telegram: 2,
+  youtube: 3,
+  calendar: 4,
 }
 
 function renderInsightText(text: string) {
