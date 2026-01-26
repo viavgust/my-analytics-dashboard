@@ -1520,10 +1520,16 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
     if (!rawText) return null;
 
     let parsed: any = null;
-    try {
-      parsed = JSON.parse(rawText);
-    } catch (err) {
-      console.error("Failed to parse Gemini summary JSON", err);
+    if (typeof rawText === "string") {
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (err) {
+        console.error("Failed to parse Gemini summary JSON", err);
+        return null;
+      }
+    } else if (rawText && typeof rawText === "object") {
+      parsed = rawText;
+    } else {
       return null;
     }
 
