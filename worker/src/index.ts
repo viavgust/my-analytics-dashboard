@@ -1559,6 +1559,40 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
   }
 }
 
+function buildFallbackSummary(cards: InsightCard[], runDate: string): InsightCard {
+  const nowIso = new Date().toISOString();
+  const titles = cards.map((c) => c.title).filter(Boolean).slice(0, 3);
+  while (titles.length < 3) titles.push("Фокус дня");
+
+  const text = sanitizeMultilineText(
+    [
+      "Итог: сегодня главный фокус — eBay и внешние сигналы, плюс план по календарю.",
+      "Топ-3 приоритета:",
+      `1) ${titles[0]}`,
+      `2) ${titles[1]}`,
+      `3) ${titles[2]}`,
+      "Риски/что проверить: просадки по динамике и свежесть данных.",
+    ].join("\n"),
+    MAX_TEXT_LENGTH
+  );
+
+  return {
+    id: crypto.randomUUID(),
+    createdAt: nowIso,
+    runDate,
+    source: "summary",
+    type: "recommendation",
+    period: "today",
+    title: "Сводка",
+    text,
+    actions: [
+      "Выдели 1 главный фокус дня и отложи второстепенное",
+      "Сформулируй критерий успеха на сегодня (1 строка)",
+    ],
+    inputDigest: null,
+  };
+}
+
 async function generateAndStoreInsights(env: Env, trigger: string) {
   const runDate = getRunDate();
   const inputs = await collectInsightInputs(env);
@@ -1567,7 +1601,7 @@ async function generateAndStoreInsights(env: Env, trigger: string) {
 
   const insights = normalizeInsights(aiRaw, runDate, { summary, inputs });
   const summaryCard = await generateSummaryWithGemini(env, insights);
-  const merged = summaryCard ? [summaryCard, ...insights] : insights;
+  const merged = [summaryCard ?? buildFallbackSummary(insights, runDate), ...insights];
   const digest = await buildInputDigest({
     runDate,
     trigger,
