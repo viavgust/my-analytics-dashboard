@@ -63,6 +63,9 @@ const INSIGHTS_MAX_ACTIONS = 3;
 const YT_CACHE_TTL_DAYS = 7;
 const MAX_TITLE_LENGTH = 60;
 const MAX_TEXT_LENGTH = 300;
+const SUMMARY_TIMEZONE = "America/New_York";
+const SUMMARY_LOOKAHEAD_DAYS = 14;
+const LESSON_TITLE_RE = /(урок|занятие|курс|нейросет|homework|lesson)/i;
 
 // Обновление всех источников (YouTube / Sheets / Telegram / Calendar) параллельно с таймаутами
 async function refreshAll(env: Env) {
@@ -600,6 +603,74 @@ function sanitizeMultilineText(value: any, maxLen = MAX_TEXT_LENGTH): string {
     joined = `${joined.slice(0, Math.max(0, maxLen - 3))}...`;
   }
   return joined;
+}
+
+function getDatePartsInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const map: Record<string, string> = {};
+  for (const part of parts) {
+    if (part.type !== "literal") map[part.type] = part.value;
+  }
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+  };
+}
+
+function diffDaysInTimeZone(from: Date, to: Date, timeZone: string): number {
+  const fromParts = getDatePartsInTimeZone(from, timeZone);
+  const toParts = getDatePartsInTimeZone(to, timeZone);
+  const fromUtc = Date.UTC(fromParts.year, fromParts.month - 1, fromParts.day);
+  const toUtc = Date.UTC(toParts.year, toParts.month - 1, toParts.day);
+  return Math.round((toUtc - fromUtc) / 86_400_000);
+}
+
+function formatDateTimeInTimeZone(date: Date, timeZone: string) {
+  const datePart = new Intl.DateTimeFormat("ru-RU", {
+    timeZone,
+    day: "2-digit",
+    month: "2-digit",
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat("ru-RU", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+  return { date: datePart, time: timePart };
+}
+
+function buildStudyBlock(events: { title: string; start: string }[] | undefined | null): string {
+  const fallback = "Учёба: следующий урок не найден в календаре (проверь события).\nДомашка: готова? (Да/Нет)";
+  if (!events || events.length === 0) return fallback;
+  const now = new Date();
+  const candidates = events
+    .map((ev) => {
+      if (!ev?.start) return null;
+      const title = ev.title || "";
+      if (!LESSON_TITLE_RE.test(title)) return null;
+      const startDate = new Date(ev.start);
+      if (Number.isNaN(startDate.getTime())) return null;
+      if (startDate < now) return null;
+      const daysAway = diffDaysInTimeZone(now, startDate, SUMMARY_TIMEZONE);
+      if (daysAway < 0 || daysAway > SUMMARY_LOOKAHEAD_DAYS) return null;
+      return { date: startDate, daysAway };
+    })
+    .filter(Boolean) as { date: Date; daysAway: number }[];
+
+  if (candidates.length === 0) return fallback;
+  candidates.sort((a, b) => a.date.getTime() - b.date.getTime());
+  const next = candidates[0];
+  const formatted = formatDateTimeInTimeZone(next.date, SUMMARY_TIMEZONE);
+  const dayPhrase =
+    next.daysAway <= 0 ? "сегодня" : next.daysAway === 1 ? "через 1 день" : `через ${next.daysAway} дней`;
+  return `Учёба: следующий урок — ${dayPhrase} (${formatted.date}, ${formatted.time})\nДомашка: готова? (Да/Нет)`;
 }
 
 function sanitizeTitleField(value: any): string {
@@ -1477,13 +1548,18 @@ Rules:
 - В "Топ-3 действия" используй глаголы: Сделай/Проверь/Сравни/Обнови.
 - Добавь 1–2 элемента конкретики (период/число), но без воды.
 - actions: ровно 2, короткие, практичные, тоже в стиле "ты".
+- НЕ добавляй строки "Учёба" и "Домашка" — они будут добавлены отдельно.
 
 Cards (JSON):
 ${JSON.stringify(payload, null, 2)}
 `;
 }
 
-async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promise<InsightCard | null> {
+async function generateSummaryWithGemini(
+  env: Env,
+  cards: InsightCard[],
+  studyBlock: string
+): Promise<InsightCard | null> {
   if (!env.GEMINI_API_KEY || cards.length === 0) return null;
   const prompt = buildSummaryPrompt(cards);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${env.GEMINI_API_KEY}`;
@@ -1549,7 +1625,10 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
       cleanedText.includes("Итог:") &&
       cleanedText.includes("Топ-3 действия") &&
       cleanedText.includes("Риски/что проверить");
-    const fallback = buildFallbackSummary(cards, getRunDate());
+    const fallback = buildFallbackSummary(cards, getRunDate(), studyBlock);
+    const composedText = hasStructure
+      ? sanitizeMultilineText([studyBlock, cleanedText].filter(Boolean).join("\n"), MAX_TEXT_LENGTH)
+      : fallback.text;
     return {
       id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
@@ -1558,7 +1637,7 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
       type: "recommendation",
       period: "today",
       title: "Сводка",
-      text: hasStructure ? cleanedText : fallback.text,
+      text: composedText,
       actions: actions.slice(0, 2),
       inputDigest: null,
     };
@@ -1568,22 +1647,20 @@ async function generateSummaryWithGemini(env: Env, cards: InsightCard[]): Promis
   }
 }
 
-function buildFallbackSummary(cards: InsightCard[], runDate: string): InsightCard {
+function buildFallbackSummary(cards: InsightCard[], runDate: string, studyBlock: string): InsightCard {
   const nowIso = new Date().toISOString();
   const titles = cards.map((c) => c.title).filter(Boolean).slice(0, 3);
   while (titles.length < 3) titles.push("Фокус дня");
 
-  const text = sanitizeMultilineText(
-    [
-      "Итог: фокус дня — eBay и свежесть внешних сигналов; календарь держи как план.",
-      "Топ-3 действия:",
-      "1) Сравни 7д vs пред. 7д и зафиксируй причину.",
-      "2) Проверь средний чек и главный источник кассы за 7д.",
-      "3) Обнови сбор, если обновление старше 24 ч.",
-      "Риски/что проверить: несвежие данные, сбои источников.",
-    ].join("\n"),
-    MAX_TEXT_LENGTH
-  );
+  const body = [
+    "Итог: фокус дня — eBay и свежесть внешних сигналов; календарь держи как план.",
+    "Топ-3 действия:",
+    "1) Сравни 7д vs пред. 7д и зафиксируй причину.",
+    "2) Проверь средний чек и главный источник кассы за 7д.",
+    "3) Обнови сбор, если обновление старше 24 ч.",
+    "Риски/что проверить: несвежие данные, сбои источников.",
+  ].join("\n");
+  const text = sanitizeMultilineText([studyBlock, body].filter(Boolean).join("\n"), MAX_TEXT_LENGTH);
 
   return {
     id: crypto.randomUUID(),
@@ -1609,8 +1686,9 @@ async function generateAndStoreInsights(env: Env, trigger: string) {
   const aiRaw = await generateInsightsWithGemini(env, inputs, summary);
 
   const insights = normalizeInsights(aiRaw, runDate, { summary, inputs });
-  const summaryCard = await generateSummaryWithGemini(env, insights);
-  const merged = [summaryCard ?? buildFallbackSummary(insights, runDate), ...insights];
+  const studyBlock = buildStudyBlock(inputs.calendar);
+  const summaryCard = await generateSummaryWithGemini(env, insights, studyBlock);
+  const merged = [summaryCard ?? buildFallbackSummary(insights, runDate, studyBlock), ...insights];
   const digest = await buildInputDigest({
     runDate,
     trigger,
@@ -1829,7 +1907,7 @@ async function loadCalendarEvents(env: Env) {
     await ensureCalendarTable(env);
     const nowIso = new Date().toISOString();
     const { results } = await env.DB.prepare(
-      "SELECT summary, start_time, end_time, html_link FROM calendar_events WHERE start_time >= ? ORDER BY start_time ASC LIMIT 5"
+      "SELECT summary, start_time, end_time, html_link FROM calendar_events WHERE start_time >= ? ORDER BY start_time ASC LIMIT 20"
     )
       .bind(nowIso)
       .all<{

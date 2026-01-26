@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Bot, RefreshCw, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -96,17 +96,31 @@ function InsightCardView({
   badges,
   text,
   actions,
+  isSummary,
 }: {
   title: string
-  badges: string[]
+  badges: ReactNode[]
   text: string
   actions?: string[]
+  isSummary?: boolean
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur">
+    <div
+      className={cn(
+        "rounded-2xl border border-white/10 bg-white/5 px-4 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur",
+        isSummary && "border-amber-300/40 bg-white/10 shadow-[0_0_0_1px_rgba(251,191,36,0.25)]"
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-white">{title}</div>
+          <div className="flex items-center gap-2 text-sm font-semibold text-white">
+            {isSummary && (
+              <span className="text-amber-300" aria-hidden="true">
+                ⭐
+              </span>
+            )}
+            <span>{title}</span>
+          </div>
           {badges.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-2 text-xs text-white/80">
               {badges.map((b, i) => (
@@ -268,24 +282,35 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
               )
               .map((card) => {
               const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
-              const metaBadges = [
-                <span key="source" className={cn("rounded-full px-2 py-0.5", sourceMeta.className)}>
-                  {sourceMeta.label}
-                </span>,
-                <span key="type" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
-                  {typeLabels[card.type]}
-                </span>,
-                <span key="period" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
-                  {periodLabels[card.period]}
-                </span>,
-              ]
+              const isSummary = card.source === "summary"
+              const metaBadges = isSummary
+                ? [
+                    <span
+                      key="summary"
+                      className="rounded-full border border-amber-200/40 bg-amber-400/15 px-2 py-0.5 text-amber-200"
+                    >
+                      Главное
+                    </span>,
+                  ]
+                : [
+                    <span key="source" className={cn("rounded-full px-2 py-0.5", sourceMeta.className)}>
+                      {sourceMeta.label}
+                    </span>,
+                    <span key="type" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
+                      {typeLabels[card.type]}
+                    </span>,
+                    <span key="period" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
+                      {periodLabels[card.period]}
+                    </span>,
+                  ]
               return (
                 <InsightCardView
                   key={card.id}
                   title={card.title}
-                  badges={metaBadges as any}
+                  badges={metaBadges}
                   text={card.text}
                   actions={card.actions}
+                  isSummary={isSummary}
                 />
               )
             })}
