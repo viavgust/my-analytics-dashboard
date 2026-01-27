@@ -391,26 +391,24 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
               <div>
                 <p className="text-xs uppercase tracking-[0.14em] text-amber-200/70">AI Insights</p>
                 <p className="text-sm text-amber-100/80">Инсайты и действия для дашборда</p>
-                <p className="text-[11px] text-amber-100/60">
-                  {runDate ? `Обновлено: ${runDate.slice(0, 10)}` : "Последний прогон: —"}
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    void fetchInsights("generate")
-                  }}
-                  disabled={loading}
-                  title="Запустить генерацию"
-                  aria-label="Запустить генерацию"
-                >
-                  {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
-                </Button>
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-amber-100/60">
+                  <span>{runDate ? `Обновлено: ${runDate.slice(0, 10)}` : "Последний прогон: —"}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-amber-200 hover:bg-amber-500/10 h-9 w-9"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void fetchInsights("generate")
+                    }}
+                    disabled={loading}
+                    title="Запустить генерацию"
+                    aria-label="Запустить генерацию"
+                  >
+                    {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
             </div>
 
