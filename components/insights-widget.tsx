@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react"
-import { RefreshCw, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -305,20 +305,6 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
     }
   }
 
-  const handleRefresh = (event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault()
-    event.stopPropagation()
-    void fetchInsights("generate")
-  }
-
-  const handleClose = (event?: MouseEvent<HTMLElement>) => {
-    if (event) {
-      event.preventDefault()
-      event.stopPropagation()
-    }
-    setOpen(false)
-  }
-
   const badgeContent = runDate ? `AI · ${runDate}` : "AI"
 
   useEffect(() => {
@@ -371,31 +357,29 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
 
   return (
     <>
-      <div className="fixed right-2 top-[calc(env(safe-area-inset-top)+0.5rem)] z-10 pointer-events-none sm:right-4 sm:top-4">
-        <button
-          type="button"
-          onClick={() => setOpen((prev) => !prev)}
-          className="group pointer-events-auto"
-          aria-label="AI Insights"
-        >
-          <div className="relative">
-            <img
-              src="/robot-ai.svg"
-              alt="AI robot"
-              className="h-24 w-auto drop-shadow-[0_10px_20px_rgba(14,165,233,0.35)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:scale-[1.04]"
-            />
-            <Badge className="absolute -top-2 -right-3 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
-              AI
-            </Badge>
-          </div>
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] sm:top-4"
+        aria-label="AI Insights"
+      >
+        <div className="relative">
+          <img
+            src="/robot-ai.svg"
+            alt="AI robot"
+            className="h-24 w-auto drop-shadow-[0_10px_20px_rgba(14,165,233,0.35)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:scale-[1.04]"
+          />
+          <Badge className="absolute -top-2 -right-3 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
+            AI
+          </Badge>
+        </div>
+      </button>
 
       {open && (
         <>
           <div
             className="fixed inset-0 z-40 bg-black/50"
-            onClick={handleClose}
+            onClick={() => setOpen(false)}
             aria-hidden="true"
           />
           <aside
@@ -411,27 +395,21 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
                   {runDate ? `Обновлено: ${runDate.slice(0, 10)}` : "Последний прогон: —"}
                 </p>
               </div>
-              <div className="relative z-50 flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
                   size="icon-sm"
                   className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
-                  onClick={handleRefresh}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void fetchInsights("generate")
+                  }}
                   disabled={loading}
                   title="Запустить генерацию"
                   aria-label="Запустить генерацию"
                 >
                   {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
-                  onClick={handleClose}
-                  title="Закрыть"
-                  aria-label="Закрыть"
-                >
-                  <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>

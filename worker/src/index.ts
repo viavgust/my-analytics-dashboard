@@ -99,20 +99,20 @@ export default {
     try {
       const url = new URL(request.url);
 
-      // CORS preflight
-      if (request.method === "OPTIONS") {
-        const corsPaths = ["/api/dashboard", "/api/refresh", "/api/insights/latest", "/api/insights/generate"];
-        if (corsPaths.includes(url.pathname)) {
-          return new Response(null, {
-            status: 204,
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type",
-            },
-          });
-        }
-      }
+  // CORS preflight
+  if (request.method === "OPTIONS") {
+    const corsPaths = ["/api/dashboard", "/api/refresh", "/api/insights/latest", "/api/insights/generate"];
+    if (corsPaths.includes(url.pathname)) {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
+    }
+  }
 
       // GET /api/dashboard — отдать данные для дашборда
       if (request.method === "GET" && url.pathname === "/api/dashboard") {
@@ -497,7 +497,7 @@ function buildDemoDashboardPayload() {
 }
 
 // Утилита для JSON-ответа
-function jsonResponse(data: unknown, status: number = 200): Response {
+function jsonResponse(data: unknown, status: number = 200, cache: "default" | "no-store" = "default"): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -505,6 +505,7 @@ function jsonResponse(data: unknown, status: number = 200): Response {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
+      ...(cache === "no-store" ? { "Cache-Control": "no-store" } : {}),
     },
   });
 }
@@ -522,9 +523,16 @@ type InsightCard = {
   inputDigest?: string | null;
 };
 
-function getRunDate(date = new Date()): string {
-  const d = new Date(date);
-  return d.toISOString().slice(0, 10);
+function getRunDate(date = new Date(), timeZone = "America/New_York"): string {
+  // Формируем дату в нужном часовом поясе, чтобы дневной прогон совпадал с локальным днём
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const lookup = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${lookup.year}-${lookup.month}-${lookup.day}`;
 }
 
 async function ensureAiInsightsTable(env: Env): Promise<boolean> {
@@ -1771,10 +1779,10 @@ async function generateAndStoreInsights(env: Env, trigger: string) {
 async function handleInsightsLatest(env: Env): Promise<Response> {
   try {
     const latest = await loadLatestInsights(env);
-    if (latest.insights.length > 0) return jsonResponse(latest);
+    if (latest.insights.length > 0) return jsonResponse(latest, 200, "no-store");
 
     const generated = await generateAndStoreInsights(env, "latest-fallback");
-    return jsonResponse({ runDate: generated.runDate, insights: generated.insights });
+    return jsonResponse({ runDate: generated.runDate, insights: generated.insights }, 200, "no-store");
   } catch (e: any) {
     console.error("handleInsightsLatest error:", e.stack || e.message || e);
     try {
@@ -1794,10 +1802,10 @@ async function handleInsightsLatest(env: Env): Promise<Response> {
         insights: fallback,
         error: "fallback",
         message: String(e?.message || e),
-      });
+      }, 200, "no-store");
     } catch (fallbackErr: any) {
       console.error("handleInsightsLatest fallback failed:", fallbackErr.stack || fallbackErr.message || fallbackErr);
-      return jsonResponse({ error: "Internal error", message: String(e?.message || e) }, 500);
+      return jsonResponse({ error: "Internal error", message: String(e?.message || e) }, 500, "no-store");
     }
   }
 }
@@ -1805,7 +1813,7 @@ async function handleInsightsLatest(env: Env): Promise<Response> {
 async function handleInsightsGenerate(env: Env): Promise<Response> {
   try {
     const generated = await generateAndStoreInsights(env, "manual");
-    return jsonResponse({ runDate: generated.runDate, insights: generated.insights });
+    return jsonResponse({ runDate: generated.runDate, insights: generated.insights }, 200, "no-store");
   } catch (e: any) {
     console.error("handleInsightsGenerate error:", e.stack || e.message || e);
     try {
