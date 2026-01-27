@@ -375,8 +375,8 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
         type="button"
         onClick={() => setOpen((prev) => !prev)}
         className={cn(
-          "group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] transition-opacity sm:top-4",
-          open && "pointer-events-none opacity-0"
+          "group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] sm:top-4",
+          open && "pointer-events-none"
         )}
         aria-label="AI Insights"
       >
