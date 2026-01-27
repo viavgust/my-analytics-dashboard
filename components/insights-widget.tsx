@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -235,6 +235,8 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
   const [insights, setInsights] = useState<InsightCard[]>([])
   const [runDate, setRunDate] = useState<string | null>(null)
   const [homeworkStatus, setHomeworkStatus] = useState<HomeworkStatus>(null)
+  const scrollLockRef = useRef<{ top: string; position: string; width: string; overflow: string } | null>(null)
+  const scrollYRef = useRef(0)
 
   const baseUrl = useMemo(() => workerUrl?.replace(/\/$/, "") ?? "", [workerUrl])
   const homeworkKey = useMemo(() => getHomeworkKey(runDate), [runDate])
@@ -316,15 +318,49 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [open])
 
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const body = document.body
+    if (open) {
+      scrollYRef.current = window.scrollY || window.pageYOffset || 0
+      scrollLockRef.current = {
+        top: body.style.top,
+        position: body.style.position,
+        width: body.style.width,
+        overflow: body.style.overflow,
+      }
+      body.style.position = "fixed"
+      body.style.top = `-${scrollYRef.current}px`
+      body.style.width = "100%"
+      body.style.overflow = "hidden"
+      return () => {
+        if (!scrollLockRef.current) return
+        body.style.position = scrollLockRef.current.position
+        body.style.top = scrollLockRef.current.top
+        body.style.width = scrollLockRef.current.width
+        body.style.overflow = scrollLockRef.current.overflow
+        const y = scrollYRef.current
+        scrollLockRef.current = null
+        window.scrollTo(0, y)
+      }
+    }
+    if (scrollLockRef.current) {
+      body.style.position = scrollLockRef.current.position
+      body.style.top = scrollLockRef.current.top
+      body.style.width = scrollLockRef.current.width
+      body.style.overflow = scrollLockRef.current.overflow
+      const y = scrollYRef.current
+      scrollLockRef.current = null
+      window.scrollTo(0, y)
+    }
+  }, [open])
+
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className={cn(
-          "group fixed bottom-4 right-4 z-[60] sm:bottom-auto",
-          open ? "sm:top-24" : "sm:top-4"
-        )}
+        className="group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] sm:top-4"
         aria-label="AI Insights"
       >
         <div className="relative">
@@ -347,103 +383,103 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
             aria-hidden="true"
           />
           <aside
-            className="fixed inset-y-0 right-0 z-50 w-[92vw] bg-[#1a1814] text-white border-l border-white/10 shadow-2xl shadow-black/40 sm:max-w-[420px]"
+            className="fixed right-0 top-0 bottom-0 z-50 flex h-[100dvh] w-[92vw] flex-col overflow-hidden bg-[#1a1814] text-white border-l border-white/10 shadow-2xl shadow-black/40 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] sm:max-w-[420px]"
             role="dialog"
             aria-modal="false"
           >
-        <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4">
-          <div>
-            <p className="text-xs uppercase tracking-[0.14em] text-amber-200/70">AI Insights</p>
-            <p className="text-sm text-amber-100/80">Инсайты и действия для дашборда</p>
-            <p className="text-[11px] text-amber-100/60">
-              {runDate ? `Обновлено: ${runDate.slice(0, 10)}` : "Последний прогон: —"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                void fetchInsights("generate")
-              }}
-              disabled={loading}
-              title="Запустить генерацию"
-              aria-label="Запустить генерацию"
-            >
-              {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
-            </Button>
-          </div>
-        </div>
-
-        <ScrollArea className="h-[78vh] px-4 py-3">
-          {loading && (
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-amber-100/80">
-              <Spinner className="h-4 w-4" />
-              Загружаю инсайты...
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.14em] text-amber-200/70">AI Insights</p>
+                <p className="text-sm text-amber-100/80">Инсайты и действия для дашборда</p>
+                <p className="text-[11px] text-amber-100/60">
+                  {runDate ? `Обновлено: ${runDate.slice(0, 10)}` : "Последний прогон: —"}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    void fetchInsights("generate")
+                  }}
+                  disabled={loading}
+                  title="Запустить генерацию"
+                  aria-label="Запустить генерацию"
+                >
+                  {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
-          )}
 
-          {!loading && error && (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
-              {error}
-            </div>
-          )}
+            <ScrollArea className="flex-1 min-h-0 overscroll-contain touch-pan-y px-4 py-3">
+              {loading && (
+                <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-amber-100/80">
+                  <Spinner className="h-4 w-4" />
+                  Загружаю инсайты...
+                </div>
+              )}
 
-          {!loading && !error && insights.length === 0 && (
-            <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-amber-100/80">
-              Нет инсайтов. Попробуй обновить.
-            </div>
-          )}
+              {!loading && error && (
+                <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+                  {error}
+                </div>
+              )}
 
-          <div className="mt-2 space-y-3">
-            {insights
-              .map((card, idx) => ({ ...card, _idx: idx }))
-              .sort(
-                (a, b) =>
-                  (SOURCE_ORDER[a.source] ?? 999) - (SOURCE_ORDER[b.source] ?? 999) ||
-                  a._idx - b._idx
-              )
-              .map((card) => {
-              const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
-              const isSummary = card.source === "summary"
-              const metaBadges = isSummary
-                ? [
-                    <span
-                      key="summary"
-                      className="rounded-full border border-amber-200/40 bg-amber-400/15 px-2 py-0.5 text-amber-200"
-                    >
-                      Главное
-                    </span>,
-                  ]
-                : [
-                    <span key="source" className={cn("rounded-full px-2 py-0.5", sourceMeta.className)}>
-                      {sourceMeta.label}
-                    </span>,
-                    <span key="type" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
-                      {typeLabels[card.type]}
-                    </span>,
-                    <span key="period" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
-                      {periodLabels[card.period]}
-                    </span>,
-                  ]
-              return (
-                <InsightCardView
-                  key={card.id}
-                  title={card.title}
-                  badges={metaBadges}
-                  text={card.text}
-                  actions={card.actions}
-                  isSummary={isSummary}
-                  homeworkStatus={isSummary ? homeworkStatus : undefined}
-                  onHomeworkChange={isSummary ? handleHomeworkChange : undefined}
-                />
-              )
-            })}
-          </div>
-        </ScrollArea>
+              {!loading && !error && insights.length === 0 && (
+                <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-amber-100/80">
+                  Нет инсайтов. Попробуй обновить.
+                </div>
+              )}
+
+              <div className="mt-2 space-y-3">
+                {insights
+                  .map((card, idx) => ({ ...card, _idx: idx }))
+                  .sort(
+                    (a, b) =>
+                      (SOURCE_ORDER[a.source] ?? 999) - (SOURCE_ORDER[b.source] ?? 999) ||
+                      a._idx - b._idx
+                  )
+                  .map((card) => {
+                    const sourceMeta = sourceStyles[card.source] ?? sourceStyles.ebay
+                    const isSummary = card.source === "summary"
+                    const metaBadges = isSummary
+                      ? [
+                          <span
+                            key="summary"
+                            className="rounded-full border border-amber-200/40 bg-amber-400/15 px-2 py-0.5 text-amber-200"
+                          >
+                            Главное
+                          </span>,
+                        ]
+                      : [
+                          <span key="source" className={cn("rounded-full px-2 py-0.5", sourceMeta.className)}>
+                            {sourceMeta.label}
+                          </span>,
+                          <span key="type" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
+                            {typeLabels[card.type]}
+                          </span>,
+                          <span key="period" className="rounded-full bg-white/5 px-2 py-0.5 text-white/75">
+                            {periodLabels[card.period]}
+                          </span>,
+                        ]
+                    return (
+                      <InsightCardView
+                        key={card.id}
+                        title={card.title}
+                        badges={metaBadges}
+                        text={card.text}
+                        actions={card.actions}
+                        isSummary={isSummary}
+                        homeworkStatus={isSummary ? homeworkStatus : undefined}
+                        onHomeworkChange={isSummary ? handleHomeworkChange : undefined}
+                      />
+                    )
+                  })}
+              </div>
+            </ScrollArea>
           </aside>
         </>
       )}
