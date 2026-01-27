@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { RefreshCw } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react"
+import { RefreshCw, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -305,6 +305,20 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
     }
   }
 
+  const handleRefresh = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void fetchInsights("generate")
+  }
+
+  const handleClose = (event?: MouseEvent<HTMLElement>) => {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    setOpen(false)
+  }
+
   const badgeContent = runDate ? `AI · ${runDate}` : "AI"
 
   useEffect(() => {
@@ -360,7 +374,10 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] sm:top-4"
+        className={cn(
+          "group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] transition-opacity sm:top-4",
+          open && "pointer-events-none opacity-0"
+        )}
         aria-label="AI Insights"
       >
         <div className="relative">
@@ -379,7 +396,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
         <>
           <div
             className="fixed inset-0 z-40 bg-black/50"
-            onClick={() => setOpen(false)}
+            onClick={handleClose}
             aria-hidden="true"
           />
           <aside
@@ -400,16 +417,22 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
                   variant="ghost"
                   size="icon-sm"
                   className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
-                  onClick={(event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    void fetchInsights("generate")
-                  }}
+                  onClick={handleRefresh}
                   disabled={loading}
                   title="Запустить генерацию"
                   aria-label="Запустить генерацию"
                 >
                   {loading ? <Spinner className="h-4 w-4" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-amber-200 hover:bg-amber-500/10 h-11 w-11 sm:h-9 sm:w-9"
+                  onClick={handleClose}
+                  title="Закрыть"
+                  aria-label="Закрыть"
+                >
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
             </div>
