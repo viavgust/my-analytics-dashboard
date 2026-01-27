@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { RefreshCw } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -235,6 +235,8 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
   const [insights, setInsights] = useState<InsightCard[]>([])
   const [runDate, setRunDate] = useState<string | null>(null)
   const [homeworkStatus, setHomeworkStatus] = useState<HomeworkStatus>(null)
+  const scrollLockRef = useRef<{ top: string; position: string; width: string; overflow: string } | null>(null)
+  const scrollYRef = useRef(0)
 
   const baseUrl = useMemo(() => workerUrl?.replace(/\/$/, "") ?? "", [workerUrl])
   const homeworkKey = useMemo(() => getHomeworkKey(runDate), [runDate])
@@ -316,6 +318,43 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [open])
 
+  useEffect(() => {
+    if (typeof document === "undefined") return
+    const body = document.body
+    if (open) {
+      scrollYRef.current = window.scrollY || window.pageYOffset || 0
+      scrollLockRef.current = {
+        top: body.style.top,
+        position: body.style.position,
+        width: body.style.width,
+        overflow: body.style.overflow,
+      }
+      body.style.position = "fixed"
+      body.style.top = `-${scrollYRef.current}px`
+      body.style.width = "100%"
+      body.style.overflow = "hidden"
+      return () => {
+        if (!scrollLockRef.current) return
+        body.style.position = scrollLockRef.current.position
+        body.style.top = scrollLockRef.current.top
+        body.style.width = scrollLockRef.current.width
+        body.style.overflow = scrollLockRef.current.overflow
+        const y = scrollYRef.current
+        scrollLockRef.current = null
+        window.scrollTo(0, y)
+      }
+    }
+    if (scrollLockRef.current) {
+      body.style.position = scrollLockRef.current.position
+      body.style.top = scrollLockRef.current.top
+      body.style.width = scrollLockRef.current.width
+      body.style.overflow = scrollLockRef.current.overflow
+      const y = scrollYRef.current
+      scrollLockRef.current = null
+      window.scrollTo(0, y)
+    }
+  }, [open])
+
   return (
     <>
       <button
@@ -375,7 +414,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
               </div>
             </div>
 
-            <ScrollArea className="flex-1 min-h-0 px-4 py-3">
+            <ScrollArea className="flex-1 min-h-0 overscroll-contain touch-pan-y px-4 py-3">
               {loading && (
                 <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-amber-100/80">
                   <Spinner className="h-4 w-4" />
