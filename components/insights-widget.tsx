@@ -371,26 +371,25 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className={cn(
-          "group fixed right-4 top-[calc(env(safe-area-inset-top)+1rem)] z-[60] sm:top-4",
-          open && "pointer-events-none"
-        )}
-        aria-label="AI Insights"
-      >
-        <div className="relative">
-          <img
-            src="/robot-ai.svg"
-            alt="AI robot"
-            className="h-24 w-auto drop-shadow-[0_10px_20px_rgba(14,165,233,0.35)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:scale-[1.04]"
-          />
-          <Badge className="absolute -top-2 -right-3 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
-            AI
-          </Badge>
-        </div>
-      </button>
+      <div className="fixed right-2 top-[calc(env(safe-area-inset-top)+0.5rem)] z-10 pointer-events-none sm:right-4 sm:top-4">
+        <button
+          type="button"
+          onClick={() => setOpen((prev) => !prev)}
+          className="group pointer-events-auto"
+          aria-label="AI Insights"
+        >
+          <div className="relative">
+            <img
+              src="/robot-ai.svg"
+              alt="AI robot"
+              className="h-24 w-auto drop-shadow-[0_10px_20px_rgba(14,165,233,0.35)] transition-transform duration-200 group-hover:-translate-y-1 group-hover:scale-[1.04]"
+            />
+            <Badge className="absolute -top-2 -right-3 rounded-full bg-gray-900 px-1.5 py-0 text-[10px] font-semibold text-amber-200">
+              AI
+            </Badge>
+          </div>
+        </button>
+      </div>
 
       {open && (
         <>
@@ -412,7 +411,7 @@ export function InsightsWidget({ workerUrl }: { workerUrl?: string }) {
                   {runDate ? `Обновлено: ${runDate.slice(0, 10)}` : "Последний прогон: —"}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="relative z-50 flex items-center gap-2">
                 <Button
                   variant="ghost"
                   size="icon-sm"
